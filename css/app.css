@@ -77,6 +77,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .rangee .sous{font-size:12.5px;color:var(--gris);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rangee .droite{text-align:right;flex-shrink:0}
 .rangee .montant{font-family:PlexMono,monospace;font-variant-numeric:tabular-nums;font-size:14px;font-weight:500}
+.rangee>svg{width:17px;height:17px;color:#C3CAD2;flex-shrink:0}
 
 .puce{
   display:inline-block;font-size:10.5px;padding:2.5px 7px;border-radius:99px;
@@ -105,6 +106,18 @@ input:focus,select:focus,textarea:focus{
   outline:0;border-color:var(--marine);box-shadow:0 0 0 3px rgba(11,44,72,.09)
 }
 input[inputmode=decimal],input[inputmode=numeric]{font-family:PlexMono,monospace;text-align:right}
+input[type=checkbox]{
+  width:22px;height:22px;min-width:22px;padding:0;flex-shrink:0;
+  border:1.5px solid #C3CAD2;border-radius:6px;background:var(--surface);
+  display:grid;place-content:center;transition:background var(--t),border-color var(--t)
+}
+input[type=checkbox]:checked{background:var(--marine);border-color:var(--marine)}
+input[type=checkbox]:checked::after{
+  content:'';width:11px;height:6px;border:2px solid #fff;border-top:0;border-right:0;
+  transform:rotate(-45deg) translateY(-1px)
+}
+input[type=checkbox]:focus{box-shadow:0 0 0 3px rgba(11,44,72,.12)}
+.case{display:flex;gap:11px;align-items:center;padding:11px 0;font-size:14px;cursor:pointer}
 textarea{min-height:84px;resize:vertical;line-height:1.55}
 select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px}
 .duo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -147,6 +160,13 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
   background:var(--surface);font-size:13px;color:var(--gris);transition:all var(--t)
 }
 .filtres button[aria-pressed=true]{background:var(--marine);color:#fff;border-color:var(--marine)}
+
+.segment{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--fond);border-radius:var(--r-s);padding:4px;margin-bottom:14px}
+.segment button{
+  border:0;background:transparent;padding:9px 6px;border-radius:6px;font-size:14px;
+  color:var(--gris);transition:background var(--t),color var(--t)
+}
+.segment button[aria-pressed=true]{background:var(--surface);color:var(--encre);font-weight:500;box-shadow:0 1px 2px rgba(11,44,72,.08)}
 
 /* ---------- Totaux ---------- */
 .totaux{background:var(--surface);border:1px solid var(--trait);border-radius:var(--r);padding:12px 14px;margin-top:12px}

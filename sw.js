@@ -1,4 +1,4 @@
-const VERSION = 'soloapp-v1.0.1';
+const VERSION = 'soloapp-v1.0.2';
 
 const RESSOURCES = [
   './',

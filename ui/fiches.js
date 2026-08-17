@@ -40,17 +40,27 @@ export async function vueClients(app) {
 }
 
 export function ficheClient(client, apres) {
-  const c = client ?? { id: nouvelId(), nom: '', societe: '', siret: '', adresse: '', cp: '', ville: '', email: '', telephone: '', notes: '' };
+  const c = client ?? {
+    id: nouvelId(), categorie: 'pro', nom: '', societe: '', siret: '',
+    adresse: '', cp: '', ville: '', email: '', telephone: '', notes: '',
+  };
+  let categorie = c.categorie ?? (c.societe ? 'pro' : 'particulier');
   const champ = (cle, libelle, opts = '') =>
     `<div class="champ"><label>${libelle}</label><input name="${cle}" value="${ech(c[cle])}" ${opts}></div>`;
 
   const v = feuille(client ? 'Modifier le client' : 'Nouveau client', `
-    ${champ('societe', 'Société')}
-    ${champ('nom', 'Contact')}
+    <div class="segment" id="cat">
+      <button data-k="pro" aria-pressed="${categorie === 'pro'}">Professionnel</button>
+      <button data-k="particulier" aria-pressed="${categorie === 'particulier'}">Particulier</button>
+    </div>
+    <div id="blocPro">
+      ${champ('societe', 'Raison sociale')}
+      ${champ('siret', 'SIRET')}
+    </div>
+    ${champ('nom', 'Nom et prénom')}
     <div class="duo">${champ('email', 'E-mail', 'type="email" inputmode="email"')}${champ('telephone', 'Téléphone', 'inputmode="tel"')}</div>
     ${champ('adresse', 'Adresse')}
     <div class="duo">${champ('cp', 'Code postal', 'inputmode="numeric"')}${champ('ville', 'Ville')}</div>
-    ${champ('siret', 'SIRET')}
     <div class="champ"><label>Notes</label><textarea name="notes">${ech(c.notes)}</textarea></div>
     <div class="erreur" id="err" hidden></div>
     <div class="actions">
@@ -58,12 +68,29 @@ export function ficheClient(client, apres) {
       <button class="btn btn-plein" data-ok>Enregistrer</button>
     </div>`);
 
+  const majCategorie = () => {
+    v.querySelector('#blocPro').style.display = categorie === 'pro' ? 'block' : 'none';
+    v.querySelector('[name=nom]').closest('.champ').querySelector('label').textContent =
+      categorie === 'pro' ? 'Contact' : 'Nom et prénom';
+    v.querySelectorAll('#cat button').forEach((b) =>
+      b.setAttribute('aria-pressed', b.dataset.k === categorie));
+  };
+  v.querySelectorAll('#cat button').forEach((b) => b.onclick = () => {
+    categorie = b.dataset.k; majCategorie();
+  });
+  majCategorie();
+
   v.querySelector('[data-ok]').onclick = async () => {
-    const d = { ...c };
+    const d = { ...c, categorie };
     v.querySelectorAll('[name]').forEach((i) => { d[i.name] = i.value.trim(); });
-    if (!d.societe && !d.nom) {
-      const e = v.querySelector('#err');
-      e.textContent = 'Indiquez au moins une société ou un contact.'; e.hidden = false;
+    if (categorie === 'particulier') { d.societe = ''; d.siret = ''; }
+    const e = v.querySelector('#err');
+    if (categorie === 'pro' && !d.societe) {
+      e.textContent = 'La raison sociale est obligatoire pour un professionnel.'; e.hidden = false;
+      return;
+    }
+    if (categorie === 'particulier' && !d.nom) {
+      e.textContent = 'Le nom est obligatoire.'; e.hidden = false;
       return;
     }
     d.creeLe ??= new Date().toISOString();

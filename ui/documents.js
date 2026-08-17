@@ -16,6 +16,12 @@ import { ficheClient, ficheArticle } from './fiches.js';
 
 const norm = (s) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const LIBELLE = { devis: 'Devis', facture: 'Facture', avoir: 'Avoir' };
+// Le francais n'accorde pas tout seul : on ecrit les articles a la main.
+const ARTICLE = {
+  devis: { defini: 'le devis', demonstratif: 'ce devis', nouveau: 'Nouveau devis' },
+  facture: { defini: 'la facture', demonstratif: 'cette facture', nouveau: 'Nouvelle facture' },
+  avoir: { defini: "l'avoir", demonstratif: 'cet avoir', nouveau: 'Nouvel avoir' },
+};
 
 // ---------------------------------------------------------------- LISTES
 
@@ -107,7 +113,7 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
 
   const clients = await tout('clients');
   const fige = estFige(doc);
-  majTitre?.(doc.numero ?? `Nouveau ${LIBELLE[doc.type].toLowerCase()}`);
+  majTitre?.(doc.numero ?? ARTICLE[doc.type].nouveau);
 
   const rendre = () => {
     const t = doc.totaux ?? calculerTotaux(doc);
@@ -125,7 +131,7 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
           <div class="titre">${client ? ech(client.societe || client.nom) : 'Choisir un client'}</div>
           <div class="sous">${client ? ech([client.ville, client.email].filter(Boolean).join(' · ') || 'Aucune coordonnée') : 'Obligatoire pour émettre'}</div>
         </div>
-        ${!fige ? ico('retour').replace('15 18l-6-6 6-6', '9 18l6-6-6-6') : ''}
+        ${!fige ? ico('chevron') : ''}
       </button>
 
       <div class="section">Lignes</div>
@@ -194,7 +200,7 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
     const b = $('#barreActions', app);
     const boutons = [];
     if (!fige) {
-      boutons.push(`<button class="btn btn-plein btn-large" id="emettre">Émettre le ${LIBELLE[doc.type].toLowerCase()}</button>`);
+      boutons.push(`<button class="btn btn-plein btn-large" id="emettre">Émettre ${ARTICLE[doc.type].defini}</button>`);
     } else {
       boutons.push(`<div class="actions">
         <button class="btn" id="apercu">${ico('pdf')} Aperçu</button>
@@ -269,7 +275,7 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
     const brancher = () => v.querySelectorAll('[data-c]').forEach((b) => b.onclick = async () => {
       doc.clientId = b.dataset.c;
       const c = clients.find((x) => x.id === doc.clientId);
-      doc.clientInstantane = { nom: c.nom, societe: c.societe, adresse: c.adresse, cp: c.cp, ville: c.ville, siret: c.siret, email: c.email };
+      doc.clientInstantane = { nom: c.nom, societe: c.societe, categorie: c.categorie, adresse: c.adresse, cp: c.cp, ville: c.ville, siret: c.siret, email: c.email };
       await enregistrer(); v.remove(); rendre();
     });
     v.querySelector('#qc').oninput = (e) => {
@@ -396,13 +402,13 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
   async function emettre() {
     if (!doc.clientId) { tampon('Choisissez un client'); return; }
     if (!doc.lignes.some((l) => !l.type || l.type === 'prestation')) { tampon('Ajoutez au moins une prestation'); return; }
-    if (!await confirmer(`Émettre ce ${LIBELLE[doc.type].toLowerCase()} ?`,
+    if (!await confirmer(`Émettre ${ARTICLE[doc.type].demonstratif} ?`,
       'Un numéro définitif lui sera attribué et il ne pourra plus être modifié.', 'Émettre')) return;
     try {
       const bouton = $('#emettre', app);
       if (bouton) bouton.disabled = true;
       doc = await emettreDocument(doc, reglages);
-      tampon(`${doc.numero} émis`);
+      tampon(`${doc.numero} ${doc.type === 'facture' ? 'émise' : 'émis'}`);
       aller('document', { id: doc.id });
     } catch (e) {
       tampon(e.message);
@@ -546,8 +552,8 @@ function ecranSignature(valider) {
     </div>
     <div class="champ" style="margin-bottom:8px"><input id="nom" placeholder="Nom du signataire"></div>
     <canvas id="toile"></canvas>
-    <label style="display:flex;gap:9px;align-items:flex-start;margin:12px 0;font-size:13.5px;color:var(--encre)">
-      <input type="checkbox" id="cond" style="width:20px;height:20px;flex-shrink:0;margin:0">
+    <label class="case" for="cond">
+      <input type="checkbox" id="cond">
       <span>J'accepte ce devis et les conditions qui y figurent.</span>
     </label>
     <div class="erreur" id="err" hidden></div>
