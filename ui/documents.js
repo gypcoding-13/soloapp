@@ -116,9 +116,7 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
   majTitre?.(doc.numero ?? ARTICLE[doc.type].nouveau);
 
   const rendre = () => {
-    const t = doc.totaux ?? calculerTotaux(doc);
     const client = clients.find((c) => c.id === doc.clientId);
-    const solde = doc.type === 'facture' && doc.totaux ? soldeFacture(doc) : null;
 
     app.innerHTML = `
       ${fige ? `<div class="bandeau b-info">${ico('info')}<div>${doc.type === 'facture'
@@ -131,35 +129,22 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
           <div class="titre">${client ? ech(client.societe || client.nom) : 'Choisir un client'}</div>
           <div class="sous">${client ? ech([client.ville, client.email].filter(Boolean).join(' · ') || 'Aucune coordonnée') : 'Obligatoire pour émettre'}</div>
         </div>
-        ${!fige ? ico('chevron') : ''}
+        ${!fige ? ico('chevron', 2, 17) : ''}
       </button>
 
       <div class="section">Lignes</div>
-      <div id="lignes">${doc.lignes.length ? doc.lignes.map(ligneHtml).join('')
-        : vide('Aucune ligne', 'Ajoutez une prestation du catalogue ou une ligne libre.')}</div>
+      <div id="lignes">${doc.lignes.map(fige ? ligneFigee : ligneEditable).join('')}</div>
 
-      ${!fige ? `<div class="actions" style="margin-top:4px">
-        <button class="btn" id="ajCatalogue">Depuis le catalogue</button>
-        <button class="btn" id="ajLibre">Ligne libre</button>
+      ${!fige ? `
+      <button class="btn btn-large" id="ajLigne" style="margin-bottom:8px">${ico('plus', 2, 17)} Ajouter une ligne</button>
+      <div class="actions" style="margin-top:0">
+        <button class="btn" id="ajCatalogue">Catalogue</button>
+        <button class="btn" id="ajSection">Titre</button>
+        <button class="btn" id="ajTexte">Note</button>
       </div>
-      <div class="actions" style="margin-top:8px">
-        <button class="btn" id="ajSection" style="flex:0 0 auto;padding:12px 14px">+ Titre</button>
-        <button class="btn" id="ajTexte" style="flex:0 0 auto;padding:12px 14px">+ Note</button>
-        <button class="btn" id="remise" style="flex:1">Remise globale${doc.remiseGlobale ? ` · ${(doc.remiseGlobale / 100).toString().replace('.', ',')} %` : ''}</button>
-      </div>` : ''}
+      <button class="btn btn-large" id="remise" style="margin-top:8px">Remise globale${doc.remiseGlobale ? ` · ${(doc.remiseGlobale / 100).toString().replace('.', ',')} %` : ''}</button>` : ''}
 
-      <div class="totaux">
-        ${t.remiseGlobaleMontant ? `
-          <div class="l"><span>Sous-total HT</span><span>${eur(t.brutHT)}</span></div>
-          <div class="l"><span>Remise</span><span>-${eur(t.remiseGlobaleMontant)}</span></div>` : ''}
-        <div class="l"><span>Total HT</span><span>${eur(t.totalHT)}</span></div>
-        ${t.ventilation.filter((v) => v.taux > 0).map((v) =>
-          `<div class="l"><span>TVA ${(v.taux / 100).toString().replace('.', ',')} % sur ${eur(v.base)}</span><span>${eur(v.tva)}</span></div>`).join('')}
-        <div class="ttc"><span>Total TTC</span><span>${eur(t.totalTTC)}</span></div>
-        ${solde && solde.regle ? `
-          <div class="l" style="margin-top:8px"><span>Déjà réglé</span><span>${eur(solde.regle)}</span></div>
-          <div class="l"><span style="font-weight:500;color:var(--encre)">Reste à payer</span><span style="font-weight:500">${eur(solde.restant)}</span></div>` : ''}
-      </div>
+      <div id="blocTotaux">${totauxHtml()}</div>
 
       ${doc.signature ? `<div class="bandeau b-ok" style="margin-top:12px">${ico('check')}<div>Signé par ${ech(doc.signature.nomSignataire)} le ${dateFr(doc.signature.signeLe)}</div></div>` : ''}
 
@@ -172,28 +157,86 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
     brancherEditeur();
   };
 
-  const ligneHtml = (l, i) => {
+  function totauxHtml() {
+    const t = doc.totaux ?? calculerTotaux(doc);
+    const solde = doc.type === 'facture' && doc.totaux ? soldeFacture(doc) : null;
+    return `<div class="totaux">
+      ${t.remiseGlobaleMontant ? `
+        <div class="l"><span>Sous-total HT</span><span>${eur(t.brutHT)}</span></div>
+        <div class="l"><span>Remise</span><span>-${eur(t.remiseGlobaleMontant)}</span></div>` : ''}
+      <div class="l"><span>Total HT</span><span>${eur(t.totalHT)}</span></div>
+      ${t.ventilation.filter((v) => v.taux > 0).map((v) =>
+        `<div class="l"><span>TVA ${(v.taux / 100).toString().replace('.', ',')} % sur ${eur(v.base)}</span><span>${eur(v.tva)}</span></div>`).join('')}
+      <div class="ttc"><span>Total TTC</span><span>${eur(t.totalTTC)}</span></div>
+      ${solde && solde.regle ? `
+        <div class="l" style="margin-top:8px"><span>Déjà réglé</span><span>${eur(solde.regle)}</span></div>
+        <div class="l"><span style="font-weight:500;color:var(--encre)">Reste à payer</span><span style="font-weight:500">${eur(solde.restant)}</span></div>` : ''}
+    </div>`;
+  }
+
+  const htLigne = (l) => Math.round((l.qte * l.pu * (10000 - (l.remise ?? 0))) / (1000 * 10000));
+
+  // Saisie directe : chaque ligne est un petit formulaire, pas une fenetre a ouvrir.
+  function ligneEditable(l) {
     if (l.type === 'section') {
-      return `<button class="rangee" data-l="${l.id}" style="background:var(--fond)">
-        <div class="corps"><div class="titre" style="color:var(--cuivre)">${ech(l.designation)}</div></div></button>`;
+      return `<div class="ligne" data-l="${l.id}">
+        <div class="ligne-tete">
+          <input data-f="designation" value="${ech(l.designation)}" placeholder="Titre de section" style="color:var(--cuivre)">
+          <button class="l-suppr" data-suppr aria-label="Supprimer">&times;</button>
+        </div></div>`;
     }
     if (l.type === 'texte') {
-      return `<button class="rangee" data-l="${l.id}">
-        <div class="corps"><div class="sous" style="white-space:normal">${ech(l.designation)}</div></div></button>`;
+      return `<div class="ligne" data-l="${l.id}">
+        <div class="ligne-tete">
+          <input data-f="designation" value="${ech(l.designation)}" placeholder="Note libre" style="font-weight:400;color:var(--gris)">
+          <button class="l-suppr" data-suppr aria-label="Supprimer">&times;</button>
+        </div></div>`;
     }
-    const ht = Math.round((l.qte * l.pu * (10000 - (l.remise ?? 0))) / (1000 * 10000));
-    return `<button class="rangee" data-l="${l.id}">
+    return `<div class="ligne" data-l="${l.id}">
+      <div class="ligne-tete">
+        <input data-f="designation" value="${ech(l.designation)}" placeholder="Désignation">
+        <button class="l-suppr" data-suppr aria-label="Supprimer">&times;</button>
+      </div>
+      <div class="ligne-grille">
+        <input data-f="qte" inputmode="decimal" value="${formatQty(l.qte)}" placeholder="Qté" aria-label="Quantité">
+        <input data-f="unite" value="${ech(l.unite)}" placeholder="Unité" aria-label="Unité">
+        <input data-f="pu" inputmode="decimal" value="${l.pu ? formatAmount(l.pu) : ''}" placeholder="Prix HT" aria-label="Prix unitaire HT">
+      </div>
+      <div class="ligne-pied">
+        <div style="display:flex;align-items:center;gap:4px">
+          <select data-f="tva" aria-label="TVA">
+            ${[2000, 1000, 550, 0].map((x) => `<option value="${x}" ${l.tva === x ? 'selected' : ''}>TVA ${(x / 100).toString().replace('.', ',')} %</option>`).join('')}
+          </select>
+          <input data-f="remise" inputmode="decimal" class="l-remise" value="${l.remise ? (l.remise / 100).toString().replace('.', ',') : ''}" placeholder="Remise %" aria-label="Remise en pourcentage">
+        </div>
+        <span class="ligne-total" data-total>${eur(htLigne(l))}</span>
+      </div></div>`;
+  }
+
+  function ligneFigee(l) {
+    if (l.type === 'section') {
+      return `<div class="rangee" style="background:var(--fond)"><div class="corps"><div class="titre" style="color:var(--cuivre)">${ech(l.designation)}</div></div></div>`;
+    }
+    if (l.type === 'texte') {
+      return `<div class="rangee"><div class="corps"><div class="sous" style="white-space:normal">${ech(l.designation)}</div></div></div>`;
+    }
+    return `<div class="rangee">
       <div class="corps">
         <div class="titre">${ech(l.designation)}</div>
         <div class="sous"><span class="mono">${formatQty(l.qte)}</span>${l.unite ? ' ' + ech(l.unite) : ''} × <span class="mono">${formatAmount(l.pu)}</span>${l.remise ? ` · -${(l.remise / 100).toString().replace('.', ',')} %` : ''}</div>
       </div>
-      <div class="droite"><div class="montant">${eur(ht)}</div></div>
-    </button>`;
-  };
+      <div class="droite"><div class="montant">${eur(htLigne(l))}</div></div>
+    </div>`;
+  }
 
+  let minuteurSauvegarde;
   const enregistrer = async () => {
     doc.majLe = horodatage();
     await ecrire('documents', doc);
+  };
+  const enregistrerBientot = () => {
+    clearTimeout(minuteurSauvegarde);
+    minuteurSauvegarde = setTimeout(enregistrer, 600);
   };
 
   function rendreActions() {
@@ -238,15 +281,83 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
   function brancherEditeur() {
     $('#btnClient', app).onclick = fige ? null : choisirClient;
     $('#notes', app).onchange = (e) => { doc.notes = e.target.value; enregistrer(); };
-    app.querySelectorAll('[data-l]').forEach((b) => b.onclick = () => {
-      if (fige) return;
-      editerLigne(doc.lignes.find((l) => l.id === b.dataset.l));
+    if (fige) return;
+
+    const zone = $('#lignes', app);
+
+    // On ne reconstruit jamais la liste pendant la frappe : le champ perdrait
+    // le focus a chaque caractere. On met a jour la ligne et les totaux.
+    const majDepuisChamp = (champ) => {
+      const bloc = champ.closest('.ligne');
+      const l = doc.lignes.find((x) => x.id === bloc.dataset.l);
+      if (!l) return;
+      const f = champ.dataset.f;
+      const v = champ.value.trim();
+      try {
+        if (f === 'designation' || f === 'unite') l[f] = champ.value;
+        else if (f === 'qte') l.qte = v ? parseQty(v) : 0;
+        else if (f === 'pu') l.pu = v ? parseAmount(v) : 0;
+        else if (f === 'remise') l.remise = v ? Math.min(10000, parsePercent(v)) : 0;
+        else if (f === 'tva') l.tva = Number(v);
+        champ.classList.remove('invalide');
+      } catch {
+        champ.classList.add('invalide');
+        return;
+      }
+      const total = bloc.querySelector('[data-total]');
+      if (total) total.textContent = eur(htLigne(l));
+      $('#blocTotaux', app).innerHTML = totauxHtml();
+      enregistrerBientot();
+    };
+
+    zone.addEventListener('input', (e) => {
+      if (e.target.dataset.f) majDepuisChamp(e.target);
     });
+    zone.addEventListener('change', (e) => {
+      if (e.target.dataset.f === 'tva') majDepuisChamp(e.target);
+    });
+    zone.addEventListener('blur', (e) => {
+      // A la sortie du champ, on reaffiche la valeur mise en forme.
+      const champ = e.target;
+      if (!champ.dataset) return;
+      const bloc = champ.closest?.('.ligne');
+      if (!bloc) return;
+      const l = doc.lignes.find((x) => x.id === bloc.dataset.l);
+      if (!l) return;
+      if (champ.dataset.f === 'pu') champ.value = l.pu ? formatAmount(l.pu) : '';
+      if (champ.dataset.f === 'qte') champ.value = formatQty(l.qte);
+    }, true);
+
+    zone.addEventListener('click', async (e) => {
+      const bouton = e.target.closest('[data-suppr]');
+      if (!bouton) return;
+      const bloc = bouton.closest('.ligne');
+      doc.lignes = doc.lignes.filter((x) => x.id !== bloc.dataset.l);
+      bloc.remove();
+      $('#blocTotaux', app).innerHTML = totauxHtml();
+      await enregistrer();
+    });
+
+    $('#ajLigne', app)?.addEventListener('click', () => ajouterLigne('prestation'));
+    $('#ajSection', app)?.addEventListener('click', () => ajouterLigne('section'));
+    $('#ajTexte', app)?.addEventListener('click', () => ajouterLigne('texte'));
     $('#ajCatalogue', app)?.addEventListener('click', depuisCatalogue);
-    $('#ajLibre', app)?.addEventListener('click', () => editerLigne(null, 'prestation'));
-    $('#ajSection', app)?.addEventListener('click', () => editerLigne(null, 'section'));
-    $('#ajTexte', app)?.addEventListener('click', () => editerLigne(null, 'texte'));
     $('#remise', app)?.addEventListener('click', remiseGlobale);
+  }
+
+  async function ajouterLigne(type, valeurs = {}) {
+    const l = {
+      id: nouvelId(), type, designation: '', qte: 1000, pu: 0,
+      unite: '', remise: 0, tva: reglages.tauxDefaut, ...valeurs,
+    };
+    doc.lignes.push(l);
+    await enregistrer();
+    const zone = $('#lignes', app);
+    zone.insertAdjacentHTML('beforeend', ligneEditable(l));
+    $('#blocTotaux', app).innerHTML = totauxHtml();
+    const champ = zone.lastElementChild.querySelector('[data-f=designation]');
+    champ?.focus();
+    champ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   function brancherActions() {
@@ -303,10 +414,10 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
     const brancher = () => v.querySelectorAll('[data-a]').forEach((b) => b.onclick = () => {
       const a = articles.find((x) => x.id === b.dataset.a);
       v.remove();
-      editerLigne({
-        id: nouvelId(), type: 'prestation', designation: a.designation, description: a.description,
-        qte: 1000, pu: a.pu, unite: a.unite, remise: 0, tva: a.tva, sourceArticleId: a.id,
-      }, 'prestation', true);
+      ajouterLigne('prestation', {
+        designation: a.designation, description: a.description,
+        pu: a.pu, unite: a.unite, tva: a.tva, sourceArticleId: a.id,
+      });
     });
     v.querySelector('#qa').oninput = (e) => {
       const f = norm(e.target.value);
@@ -315,66 +426,12 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
     };
     v.querySelector('#nouvelArticle').onclick = () => {
       v.remove();
-      ficheArticle(null, (a) => editerLigne({
-        id: nouvelId(), type: 'prestation', designation: a.designation, description: a.description,
-        qte: 1000, pu: a.pu, unite: a.unite, remise: 0, tva: a.tva, sourceArticleId: a.id,
-      }, 'prestation', true));
+      ficheArticle(null, (a) => ajouterLigne('prestation', {
+        designation: a.designation, description: a.description,
+        pu: a.pu, unite: a.unite, tva: a.tva, sourceArticleId: a.id,
+      }));
     };
     brancher();
-  }
-
-  function editerLigne(ligne, typeLigne, nouvelle = false) {
-    const l = ligne ?? {
-      id: nouvelId(), type: typeLigne, designation: '', qte: 1000,
-      pu: 0, unite: '', remise: 0, tva: reglages.tauxDefaut,
-    };
-    const estNouvelle = nouvelle || !doc.lignes.some((x) => x.id === l.id);
-    const t = l.type ?? 'prestation';
-
-    const v = feuille(estNouvelle ? 'Ajouter une ligne' : 'Modifier la ligne', `
-      <div class="champ"><label>${t === 'section' ? 'Titre de section' : t === 'texte' ? 'Note' : 'Désignation'}</label>
-        ${t === 'texte' ? `<textarea name="designation">${ech(l.designation)}</textarea>`
-          : `<input name="designation" value="${ech(l.designation)}">`}</div>
-      ${t === 'prestation' ? `
-        <div class="duo">
-          <div class="champ"><label>Quantité</label><input name="qte" inputmode="decimal" value="${formatQty(l.qte)}"></div>
-          <div class="champ"><label>Unité</label><input name="unite" value="${ech(l.unite)}" placeholder="h, m, u"></div>
-        </div>
-        <div class="duo">
-          <div class="champ"><label>Prix unitaire HT</label><input name="pu" inputmode="decimal" value="${formatAmount(l.pu)}"></div>
-          <div class="champ"><label>Remise %</label><input name="remise" inputmode="decimal" value="${l.remise ? (l.remise / 100) : ''}" placeholder="0"></div>
-        </div>
-        <div class="champ"><label>TVA</label><select name="tva">
-          ${[2000, 1000, 550, 0].map((x) => `<option value="${x}" ${l.tva === x ? 'selected' : ''}>${(x / 100).toString().replace('.', ',')} %</option>`).join('')}
-        </select></div>` : ''}
-      <div class="erreur" id="err" hidden></div>
-      <div class="actions">
-        ${estNouvelle ? '' : '<button class="btn btn-danger" data-suppr>Supprimer</button>'}
-        <button class="btn btn-plein" data-ok>${estNouvelle ? 'Ajouter' : 'Enregistrer'}</button>
-      </div>`);
-
-    v.querySelector('[data-ok]').onclick = async () => {
-      const d = { ...l };
-      v.querySelectorAll('[name]').forEach((i) => { d[i.name] = i.value.trim(); });
-      const err = v.querySelector('#err');
-      if (!d.designation) { err.textContent = 'Le libellé est obligatoire.'; err.hidden = false; return; }
-      if (t === 'prestation') {
-        try {
-          d.qte = parseQty(d.qte || '1');
-          d.pu = parseAmount(d.pu || '0');
-          d.remise = d.remise ? parsePercent(d.remise) : 0;
-          d.tva = Number(d.tva);
-        } catch { err.textContent = 'Chiffre illisible. Exemple : 18,50'; err.hidden = false; return; }
-        if (d.remise > 10000) { err.textContent = 'La remise ne peut pas dépasser 100 %.'; err.hidden = false; return; }
-      }
-      const i = doc.lignes.findIndex((x) => x.id === d.id);
-      if (i >= 0) doc.lignes[i] = d; else doc.lignes.push(d);
-      await enregistrer(); v.remove(); rendre();
-    };
-    v.querySelector('[data-suppr]')?.addEventListener('click', async () => {
-      doc.lignes = doc.lignes.filter((x) => x.id !== l.id);
-      await enregistrer(); v.remove(); rendre();
-    });
   }
 
   function remiseGlobale() {

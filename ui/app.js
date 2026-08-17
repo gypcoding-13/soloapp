@@ -11,6 +11,21 @@ import { calculerTotaux, soldeFacture } from '../core/totals.js';
 const racine = document.getElementById('app');
 let reglages;
 
+// Chrome n'autorise l'invite d'installation que depuis un geste de l'utilisateur,
+// et il ne l'emet qu'une fois : on la conserve des le chargement.
+let invitationInstall = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  invitationInstall = e;
+});
+
+const estInstallee = () =>
+  window.matchMedia('(display-mode: standalone)').matches
+  || window.matchMedia('(display-mode: fullscreen)').matches
+  || navigator.standalone === true;
+
+const estIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+
 const ONGLETS = [
   ['devis', 'Devis', 'devis'],
   ['factures', 'Factures', 'facture'],
@@ -26,9 +41,10 @@ async function demarrer() {
   reglages = await lireReglages();
 
   if (!reglages.activation) return ecranActivation();
+  if (!estInstallee() && !reglages.installationPassee) return ecranInstallation();
   if (!reglages.configure) return ecranConfiguration();
   coquille();
-  aller(location.hash.slice(1) || 'devis');
+  afficher('devis');
 }
 
 function ecranActivation() {
@@ -61,8 +77,52 @@ function ecranActivation() {
     await demanderPersistance();
     reglages = { ...reglages, activation: { code: r.code, le: new Date().toISOString() }, deviceId: nouvelIdentifiantAppareil() };
     await ecrireReglages(reglages);
+    if (!estInstallee()) return ecranInstallation();
     ecranConfiguration();
   };
+}
+
+function ecranInstallation() {
+  const ios = estIOS();
+  racine.innerHTML = `
+    <div class="accueil">
+      <img src="./assets/icon-192.png" alt="">
+      <h2>Installer SoloApp</h2>
+      <p>Installez l'application sur votre écran d'accueil.<br>
+      C'est indispensable : vos documents sont enregistrés dans l'appareil, et l'installation protège cet enregistrement.</p>
+      ${ios ? `
+        <div style="text-align:left;background:rgba(255,255,255,.08);border-radius:12px;padding:16px 18px;margin-bottom:20px;font-size:14.5px;line-height:1.75;color:#DCE6EF">
+          <div style="margin-bottom:8px">1. Appuyez sur <strong>Partager</strong> en bas de Safari</div>
+          <div style="margin-bottom:8px">2. Choisissez <strong>Sur l'écran d'accueil</strong></div>
+          <div>3. Ouvrez SoloApp depuis l'icône</div>
+        </div>
+        <button class="btn btn-accent btn-large" id="continuer">J'ai installé l'application</button>`
+      : `
+        <button class="btn btn-accent btn-large" id="installer">Installer l'application</button>
+        <div id="aide" style="font-size:13.5px;color:#A9C0D4;margin-top:18px;line-height:1.6" hidden>
+          Ouvrez le menu ⋮ de votre navigateur, puis <strong>Installer l'application</strong> ou <strong>Ajouter à l'écran d'accueil</strong>.
+        </div>
+        <button class="btn btn-large" id="continuer" style="margin-top:12px;background:transparent;color:#A9C0D4;border-color:rgba(255,255,255,.18)">Continuer sans installer</button>`}
+    </div>`;
+
+  const suite = async () => {
+    reglages = { ...reglages, installationPassee: true };
+    await ecrireReglages(reglages);
+    if (!reglages.configure) return ecranConfiguration();
+    coquille(); aller('devis');
+  };
+
+  window.addEventListener('appinstalled', suite, { once: true });
+
+  $('#installer')?.addEventListener('click', async () => {
+    if (!invitationInstall) { $('#aide').hidden = false; return; }
+    invitationInstall.prompt();
+    const { outcome } = await invitationInstall.userChoice;
+    invitationInstall = null;
+    if (outcome === 'accepted') suite();
+    else $('#aide').hidden = false;
+  });
+  $('#continuer')?.addEventListener('click', suite);
 }
 
 function ecranConfiguration() {
@@ -92,6 +152,10 @@ function coquille() {
 
   racine.querySelectorAll('[data-o]').forEach((b) => b.onclick = () => aller(b.dataset.o));
   $('#retour').onclick = () => history.back();
+  // Une entree racine reste toujours sous la pile : sans elle, le bouton retour
+  // d'Android quitte l'application des le premier appui.
+  history.replaceState({ racine: true, vue: 'devis', params: {} }, '', '#devis');
+  history.pushState({ vue: 'devis', params: {} }, '', '#devis');
   $('#fab').onclick = () => {
     const v = etat.vue;
     if (v === 'clients') return import('./fiches.js').then((m) => m.ficheClient());
@@ -102,7 +166,24 @@ function coquille() {
 
 const etat = { vue: 'devis', params: {} };
 
-export async function aller(vue, params = {}) {
+export function aller(vue, params = {}) {
+  history.pushState({ vue, params }, '', '#' + vue);
+  return afficher(vue, params);
+}
+
+let dernierRetour = 0;
+window.addEventListener('popstate', (e) => {
+  if (e.state?.racine) {
+    if (Date.now() - dernierRetour < 2500) { history.go(-1); return; }
+    dernierRetour = Date.now();
+    tampon('Appuyez à nouveau pour quitter');
+    history.pushState({ vue: etat.vue, params: etat.params }, '', '#' + etat.vue);
+    return;
+  }
+  if (e.state?.vue) afficher(e.state.vue, e.state.params ?? {});
+});
+
+async function afficher(vue, params = {}) {
   etat.vue = vue; etat.params = params;
   const app = $('#vue');
   const barre = $('#titre');
@@ -111,19 +192,24 @@ export async function aller(vue, params = {}) {
   if (!app) return;
 
   app.scrollTop = 0;
+  app.classList.add('anim');
+  setTimeout(() => app.classList.remove('anim'), 260);
   const principale = ONGLETS.some(([id]) => id === vue);
   retour.hidden = principale;
   fab.hidden = !['devis', 'factures', 'clients', 'produits'].includes(vue);
-  app.classList.toggle('avec-onglets', principale);
-  document.querySelector('.onglets').style.display = principale ? '' : 'none';
+  app.classList.add('avec-onglets');
   racine.querySelectorAll('[data-o]').forEach((b) =>
     b.setAttribute('aria-current', b.dataset.o === vue ? 'page' : 'false'));
 
-  if (principale) history.replaceState({}, '', '#' + vue);
-
   switch (vue) {
-    case 'devis': barre.textContent = 'Devis'; return vueDocuments(app, 'devis', aller);
-    case 'factures': barre.textContent = 'Factures'; return vueDocuments(app, 'facture', aller);
+    case 'devis':
+      barre.textContent = 'Devis';
+      await vueDocuments(app, 'devis', aller);
+      return rappelSauvegarde(app);
+    case 'factures':
+      barre.textContent = 'Factures';
+      await vueDocuments(app, 'facture', aller);
+      return rappelSauvegarde(app);
     case 'clients': barre.textContent = 'Clients'; return vueClients(app);
     case 'produits': barre.textContent = 'Prestations'; return vueClients && vueArticles(app);
     case 'reglages': barre.textContent = 'Réglages'; return vueReglagesEtendus(app);
@@ -133,6 +219,30 @@ export async function aller(vue, params = {}) {
     case 'journal': barre.textContent = 'Journal des numéros'; return vueJournal(app);
     default: return aller('devis');
   }
+}
+
+// Les donnees vivent dans l'appareil : sans sauvegarde, un telephone perdu
+// emporte la comptabilite. On le rappelle, sans transformer ca en bandeau permanent.
+const JOURS_AVANT_RAPPEL = 14;
+
+async function rappelSauvegarde(app) {
+  const emis = (await documentsPar('facture')).filter((d) => d.numero).length
+    + (await documentsPar('devis')).filter((d) => d.numero).length;
+  if (!emis) return;
+
+  const derniere = reglages.derniereSauvegarde;
+  const jours = derniere ? (Date.now() - new Date(derniere)) / 86400000 : Infinity;
+  if (jours < JOURS_AVANT_RAPPEL) return;
+
+  const bandeau = document.createElement('div');
+  bandeau.className = 'bandeau b-alerte';
+  bandeau.style.cursor = 'pointer';
+  bandeau.innerHTML = `${ico('alerte')}<div>${derniere
+    ? `Dernière sauvegarde il y a ${Math.floor(jours)} jours.`
+    : 'Vos documents ne sont enregistrés que dans cet appareil.'}
+    <span style="text-decoration:underline">Sauvegarder maintenant</span></div>`;
+  bandeau.onclick = () => aller('sauvegarde');
+  app.insertBefore(bandeau, app.firstChild);
 }
 
 async function vueReglagesEtendus(app) {
@@ -159,6 +269,10 @@ async function vueSauvegarde(app) {
       <div style="font-weight:500;margin-bottom:6px">Exporter</div>
       <p style="font-size:13px;color:var(--gris);margin:0 0 12px;line-height:1.5">Un fichier contenant tout : clients, prestations, documents, compteurs et réglages. Rangez-le hors du téléphone.</p>
       <button class="btn btn-plein btn-large" id="exp">Télécharger la sauvegarde</button>
+      <p style="font-size:12.5px;color:var(--gris);margin:10px 0 0;text-align:center">${
+        reglages.derniereSauvegarde
+          ? 'Dernière sauvegarde le ' + dateFr(reglages.derniereSauvegarde)
+          : 'Aucune sauvegarde effectuée'}</p>
     </div>
     <div class="carte">
       <div style="font-weight:500;margin-bottom:6px">Importer</div>
@@ -181,7 +295,10 @@ async function vueSauvegarde(app) {
     const paquet = await exporter();
     telecharger(new Blob([JSON.stringify(paquet)], { type: 'application/json' }),
       `soloapp-${new Date().toISOString().slice(0, 10)}.json`);
+    reglages = { ...reglages, derniereSauvegarde: new Date().toISOString() };
+    await ecrireReglages(reglages);
     tampon('Sauvegarde téléchargée');
+    aller('sauvegarde');
   };
 
   let mode = 'fusionner';
@@ -224,11 +341,6 @@ async function vueJournal(app) {
 }
 
 // ---------------------------------------------------------------- Divers
-
-window.addEventListener('hashchange', () => {
-  const v = location.hash.slice(1);
-  if (v && v !== etat.vue && ONGLETS.some(([id]) => id === v)) aller(v);
-});
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').then((reg) => {

@@ -24,8 +24,10 @@ const P = {
   vide: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
 };
 
-export const ico = (n, t = 2) =>
-  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${t}" stroke-linecap="round" stroke-linejoin="round"><path d="${P[n]}"/></svg>`;
+// La taille est ecrite dans l'element : un SVG sans dimension explicite
+// se dessine a 300x150 par defaut et devore la mise en page.
+export const ico = (n, t = 2, taille = 20) =>
+  `<svg viewBox="0 0 24 24" width="${taille}" height="${taille}" fill="none" stroke="currentColor" stroke-width="${t}" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="${P[n]}"/></svg>`;
 
 export const nfEuro = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const eur = (c) => nfEuro.format((c ?? 0) / 100) + ' €';

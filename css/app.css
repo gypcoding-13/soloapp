@@ -35,8 +35,10 @@ button,input,select,textarea{font:inherit;color:inherit}
   display:grid;place-items:center;color:var(--marine);flex-shrink:0;margin-left:-6px
 }
 .barre .retour:active{background:var(--fond)}
+.barre .retour[hidden]{display:none}
 .vue{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px 16px 24px}
 .vue.avec-onglets{padding-bottom:calc(84px + var(--bas))}
+.onglets button:active{background:var(--fond)}
 
 .onglets{
   position:fixed;bottom:0;left:0;right:0;z-index:30;
@@ -78,6 +80,32 @@ button,input,select,textarea{font:inherit;color:inherit}
 .rangee .droite{text-align:right;flex-shrink:0}
 .rangee .montant{font-family:PlexMono,monospace;font-variant-numeric:tabular-nums;font-size:14px;font-weight:500}
 .rangee>svg{width:17px;height:17px;color:#C3CAD2;flex-shrink:0}
+
+/* ---------- Ligne de document en saisie directe ---------- */
+.ligne{background:var(--surface);border:1px solid var(--trait);border-radius:var(--r);padding:10px 12px 11px;margin-bottom:8px}
+.ligne:focus-within{border-color:#C3CAD2}
+.ligne-tete{display:flex;align-items:center;gap:6px}
+.ligne-tete input{
+  flex:1;border:0;border-bottom:1px solid transparent;border-radius:0;padding:6px 0;
+  font-weight:500;font-size:15.5px;background:transparent
+}
+.ligne-tete input:focus{box-shadow:none;border-bottom-color:var(--marine)}
+.ligne-tete input::placeholder{color:var(--gris-clair);font-weight:400}
+.l-suppr{border:0;background:transparent;color:var(--gris-clair);font-size:23px;line-height:1;padding:2px 4px;flex-shrink:0}
+.l-suppr:active{color:var(--danger)}
+.ligne-grille{display:grid;grid-template-columns:70px 62px minmax(0,1fr);gap:7px;margin-top:9px}
+.ligne-grille input{padding:9px 10px;font-size:15px;text-align:right}
+.ligne-grille input[data-f=unite]{text-align:left}
+.ligne-pied{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:9px}
+.ligne-pied select{
+  width:auto;border:0;background-color:transparent;padding:4px 24px 4px 0;
+  font-size:12.5px;color:var(--gris);background-position:right 4px center
+}
+.ligne-pied select:focus{box-shadow:none}
+.l-remise{width:78px;border:0;padding:4px 6px;font-size:12.5px;text-align:left;color:var(--gris);background:transparent}
+.l-remise:focus{box-shadow:none;background:var(--fond)}
+.ligne-total{font-family:PlexMono,monospace;font-variant-numeric:tabular-nums;font-size:15.5px;font-weight:500;white-space:nowrap}
+input.invalide{border-color:var(--danger)!important;color:var(--danger)}
 
 .puce{
   display:inline-block;font-size:10.5px;padding:2.5px 7px;border-radius:99px;
@@ -147,6 +175,7 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
   transition:transform var(--t)
 }
 .fab:active{transform:scale(.92)}
+.fab[hidden]{display:none}
 .fab svg{width:26px;height:26px}
 
 /* ---------- Recherche ---------- */
@@ -198,7 +227,7 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .poignee{width:38px;height:4px;border-radius:99px;background:var(--trait);margin:6px auto 14px}
 @keyframes fondu{from{opacity:0}to{opacity:1}}
 @keyframes monte{from{transform:translateY(16px)}to{transform:translateY(0)}}
-.vue>*{animation:entree 220ms cubic-bezier(.2,.8,.3,1) both}
+.vue.anim>*{animation:entree 200ms cubic-bezier(.2,.8,.3,1) both}
 @keyframes entree{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
 /* ---------- Signature ---------- */
@@ -226,6 +255,7 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
   display:flex;gap:9px;align-items:flex-start;padding:11px 13px;border-radius:var(--r-s);
   font-size:13px;line-height:1.45;margin-bottom:12px
 }
+[hidden]{display:none!important}
 .bandeau svg{width:17px;height:17px;flex-shrink:0;margin-top:1px}
 .b-info{background:#E7F0F8;color:#1B5A8C}
 .b-alerte{background:#FBF2E2;color:#8A5A0B}
