@@ -241,6 +241,8 @@ function instantaneEmetteur(reglages) {
     telephone: r.telephone ?? '',
     email: r.email ?? '',
     logo: r.logo ?? null,
+    logoPosition: r.logoPosition ?? 'gauche',
+    logoFiligrane: r.logoFiligrane ?? false,
     moyensPaiement: r.moyensPaiement ?? [],
     iban: r.iban ?? '', titulaire: r.titulaire ?? '',
     coordonneesPaiement: r.coordonneesPaiement ?? '',

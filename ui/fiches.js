@@ -204,9 +204,20 @@ export async function vueReglages(app, { premierLancement = false, apres } = {})
       </div>
       <div style="flex:1">
         <button class="btn" id="choisirLogo" style="width:100%">Choisir une image</button>
-        <p style="font-size:11.5px;color:var(--gris);margin:7px 0 0;line-height:1.45">Cadre de 40 × 20 mm en haut du document. Redimensionné automatiquement.</p>
+        ${r.logo ? '<button class="btn btn-danger" id="retirerLogo" style="width:100%;margin-top:6px">Retirer</button>' : ''}
       </div>
       <input type="file" id="fLogo" accept="image/png,image/jpeg" hidden>
+    </div>
+    <div class="carte">
+      <label>Position dans l'en-tête</label>
+      <div class="filtres" id="posLogo" style="margin-bottom:14px">
+        ${[['gauche', 'Gauche'], ['centre', 'Centre'], ['droite', 'Droite'], ['aucun', 'Aucune']]
+          .map(([k, n]) => `<button data-p="${k}" aria-pressed="${(r.logoPosition ?? 'gauche') === k}">${n}</button>`).join('')}
+      </div>
+      <label class="case" for="filigrane">
+        <input type="checkbox" id="filigrane" ${r.logoFiligrane ? 'checked' : ''}>
+        <span>Afficher aussi le logo en filigrane, au centre de la page</span>
+      </label>
     </div>
 
     <div class="section">Identité</div>
@@ -273,9 +284,14 @@ export async function vueReglages(app, { premierLancement = false, apres } = {})
     <div class="section">Apparence des documents</div>
     <div class="carte">
       <label>Couleur</label>
-      <div style="display:flex;gap:10px;margin-bottom:16px" id="couleurs">
+      <div style="display:flex;gap:10px;margin-bottom:8px;align-items:center" id="couleurs">
         ${COULEURS.map(([hex, nom]) => `<button data-c="${hex}" title="${nom}" style="width:40px;height:40px;border-radius:50%;background:${hex};border:${r.couleur === hex ? '3px solid var(--encre)' : '1px solid var(--trait)'}"></button>`).join('')}
+        <label style="position:relative;width:40px;height:40px;flex-shrink:0" title="Couleur personnalisée">
+          <input type="color" id="couleurLibre" value="${ech(r.couleur)}"
+            style="position:absolute;inset:0;width:100%;height:100%;padding:0;border-radius:50%;border:1px dashed var(--gris-clair);background:conic-gradient(#B85C38,#E0A32E,#0F6E56,#185FA5,#6E3B8E,#B85C38)">
+        </label>
       </div>
+      <p id="avisContraste" style="font-size:11.5px;color:var(--gris);margin:0 0 16px" hidden></p>
       <label>Typographie</label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="typos">
         ${TYPOS.map(([id, nom]) => `<button data-t="${id}" class="btn" style="${r.typographie === id ? 'background:var(--marine);color:#fff;border-color:var(--marine)' : ''}">${nom}</button>`).join('')}
@@ -321,10 +337,29 @@ export async function vueReglages(app, { premierLancement = false, apres } = {})
   $('#regime', app).onchange = majMention; majMention();
 
   let couleur = r.couleur, typo = r.typographie;
-  app.querySelectorAll('#couleurs button').forEach((b) => b.onclick = () => {
-    couleur = b.dataset.c;
+  let logoPosition = r.logoPosition ?? 'gauche';
+
+  const majCouleur = () => {
     app.querySelectorAll('#couleurs button').forEach((x) =>
       x.style.border = x.dataset.c === couleur ? '3px solid var(--encre)' : '1px solid var(--trait)');
+    const avis = $('#avisContraste', app);
+    if (luminanceRelative(couleur) > 0.45) {
+      avis.textContent = 'Couleur claire : le texte des bandeaux passera automatiquement en noir.';
+      avis.hidden = false;
+    } else {
+      avis.hidden = true;
+    }
+  };
+  app.querySelectorAll('#couleurs button').forEach((b) => b.onclick = () => {
+    couleur = b.dataset.c; $('#couleurLibre', app).value = couleur; majCouleur();
+  });
+  $('#couleurLibre', app).oninput = (e) => { couleur = e.target.value; majCouleur(); };
+  majCouleur();
+
+  app.querySelectorAll('#posLogo button').forEach((b) => b.onclick = () => {
+    logoPosition = b.dataset.p;
+    app.querySelectorAll('#posLogo button').forEach((x) =>
+      x.setAttribute('aria-pressed', x.dataset.p === logoPosition));
   });
   app.querySelectorAll('#typos button').forEach((b) => b.onclick = () => {
     typo = b.dataset.t;
@@ -334,6 +369,10 @@ export async function vueReglages(app, { premierLancement = false, apres } = {})
 
   let logo = r.logo;
   $('#choisirLogo', app).onclick = () => $('#fLogo', app).click();
+  $('#retirerLogo', app)?.addEventListener('click', () => {
+    logo = null;
+    $('#apercuLogo', app).innerHTML = '<span style="font-size:11px;color:var(--gris-clair)">Aucun</span>';
+  });
   $('#fLogo', app).onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
     logo = await redimensionner(f, 600);
@@ -341,7 +380,10 @@ export async function vueReglages(app, { premierLancement = false, apres } = {})
   };
 
   $('#ok', app).onclick = async () => {
-    const d = { ...r, couleur, typographie: typo, logo, configure: true };
+    const d = {
+      ...r, couleur, typographie: typo, logo, configure: true,
+      logoPosition, logoFiligrane: $('#filigrane', app).checked,
+    };
     app.querySelectorAll('[name]').forEach((i) => { d[i.name] = i.value.trim(); });
     d.moyensPaiement = [...app.querySelectorAll('[data-moyen]:checked')].map((c) => c.dataset.moyen);
     if (d.moyensPaiement.includes('virement') && d.iban && !ibanPlausible(d.iban)) {
@@ -368,6 +410,15 @@ export async function vueReglages(app, { premierLancement = false, apres } = {})
     tampon('Réglages enregistrés');
     apres?.(d);
   };
+}
+
+export function luminanceRelative(hex) {
+  const h = String(hex).replace('#', '');
+  const canal = (v) => {
+    const c = parseInt(v, 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * canal(h.slice(0, 2)) + 0.7152 * canal(h.slice(2, 4)) + 0.0722 * canal(h.slice(4, 6));
 }
 
 // Verification de la cle IBAN (norme ISO 7064, modulo 97).

@@ -96,6 +96,7 @@ export const REGLAGES_DEFAUT = {
   raisonSociale: '', formeJuridique: 'EI', adresse: '', codePostal: '', ville: '',
   siret: '', rcs: '', apeCode: '', regimeTva: 'assujetti', tvaIntra: '',
   tauxDefaut: 2000, telephone: '', email: '', logo: null,
+  logoPosition: 'gauche', logoFiligrane: false,
   moyensPaiement: ['virement'], iban: '', titulaire: '',
   coordonneesPaiement: '', delaiPaiement: '30 jours',
   validiteDevis: 30, penalites: "3 × taux d'intérêt légal",
@@ -183,10 +184,20 @@ export async function journalNumeros(type, annee) {
 
 const MAGASINS_DONNEES = ['reglages', 'clients', 'articles', 'documents', 'compteurs', 'journal'];
 
+// Les PDF archives representent l'essentiel du poids et se regenerent depuis
+// les documents : la sauvegarde ne les embarque pas.
 export async function exporter() {
   const paquet = { format: 'soloapp', version: VERSION_SCHEMA, exporteLe: horodatage(), donnees: {} };
   for (const m of MAGASINS_DONNEES) paquet.donnees[m] = await tout(m);
   return paquet;
+}
+
+export async function poidsSauvegarde() {
+  const paquet = await exporter();
+  const donnees = new Blob([JSON.stringify(paquet)]).size;
+  const pdfs = await tout('pdfs');
+  const poidsPdfs = pdfs.reduce((somme, p) => somme + (p.blob?.size ?? 0), 0);
+  return { donnees, pdfs: poidsPdfs, nbPdfs: pdfs.length };
 }
 
 // mode 'remplacer' : on ecrase tout.

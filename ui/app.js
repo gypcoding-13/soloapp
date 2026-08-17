@@ -1,7 +1,9 @@
-import { $, ech, ico, eur, dateFr, tampon, feuille, confirmer, telecharger } from './kit.js';
+import {
+  $, ech, ico, eur, dateFr, tampon, feuille, confirmer, telecharger, partagerFichier,
+} from './kit.js';
 import {
   ouvrir, lireReglages, ecrireReglages, demanderPersistance, espaceUtilise,
-  exporter, importer, documentsPar, journalNumeros, tout,
+  exporter, importer, documentsPar, journalNumeros, tout, poidsSauvegarde,
 } from '../core/db.js';
 import { verifier, normaliser, nouvelIdentifiantAppareil } from '../core/activation.js';
 import { vueClients, vueArticles, vueReglages } from './fiches.js';
@@ -261,6 +263,7 @@ async function vueReglagesEtendus(app) {
 
 async function vueSauvegarde(app) {
   const espace = await espaceUtilise();
+  const poids = await poidsSauvegarde();
   const persistant = navigator.storage?.persisted ? await navigator.storage.persisted() : false;
 
   app.innerHTML = `
@@ -292,6 +295,14 @@ async function vueSauvegarde(app) {
       </div>
       <input type="file" id="f" accept="application/json,.json" hidden>
     </div>
+    ${poids ? `<div class="carte">
+      <div style="font-weight:500;margin-bottom:8px">Répartition</div>
+      <div style="font-size:12.5px;color:var(--gris);line-height:1.8">
+        <div>Données sauvegardées : <span class="mono">${(poids.donnees / 1024).toFixed(0)} Ko</span></div>
+        <div>PDF archivés : <span class="mono">${(poids.pdfs / 1048576).toFixed(1)} Mo</span> · ${poids.nbPdfs} fichier${poids.nbPdfs > 1 ? 's' : ''}</div>
+      </div>
+      <p style="font-size:11.5px;color:var(--gris-clair);margin:10px 0 0;line-height:1.5">Les PDF ne sont pas inclus dans la sauvegarde : ils se régénèrent depuis les documents. Utilisez « Archiver le PDF » sur chaque document pour les conserver hors du téléphone.</p>
+    </div>` : ''}
     ${espace ? `<div class="carte">
       <div style="font-weight:500;margin-bottom:8px">Espace utilisé</div>
       <div style="height:7px;background:var(--fond);border-radius:99px;overflow:hidden;margin-bottom:8px">
@@ -304,12 +315,37 @@ async function vueSauvegarde(app) {
 
   $('#exp', app).onclick = async () => {
     const paquet = await exporter();
-    telecharger(new Blob([JSON.stringify(paquet)], { type: 'application/json' }),
-      `soloapp-${new Date().toISOString().slice(0, 10)}.json`);
+    const nom = `soloapp-${new Date().toISOString().slice(0, 10)}.json`;
+    const blob = new Blob([JSON.stringify(paquet)], { type: 'application/json' });
     reglages = { ...reglages, derniereSauvegarde: new Date().toISOString() };
     await ecrireReglages(reglages);
-    tampon('Sauvegarde téléchargée');
-    aller('sauvegarde');
+
+    const nb = (paquet.donnees.documents ?? []).length;
+    const v = feuille('Sauvegarde prête', `
+      <div class="carte" style="margin-bottom:12px">
+        <div class="mono" style="font-size:13px;word-break:break-all">${ech(nom)}</div>
+        <div style="font-size:12.5px;color:var(--gris);margin-top:6px">
+          ${(blob.size / 1024).toFixed(0)} Ko · ${nb} document${nb > 1 ? 's' : ''}
+        </div>
+      </div>
+      <p style="margin:0 0 14px;font-size:13.5px;color:var(--gris);line-height:1.55">
+        Rangez ce fichier ailleurs que dans le téléphone : Drive, ordinateur, ou par e-mail.
+        Il n'est pas fait pour être lu, seulement conservé et réimporté ici.
+      </p>
+      <button class="btn btn-accent btn-large" id="partager">${ico('partage')} Envoyer vers Drive, mail…</button>
+      <button class="btn btn-large" id="telech" style="margin-top:8px">Télécharger seulement</button>`);
+
+    v.querySelector('#partager').onclick = async () => {
+      const r = await partagerFichier(blob, nom, {
+        objet: `Sauvegarde SoloApp du ${dateFr(new Date().toISOString())}`,
+        type: 'application/json',
+      });
+      if (r !== 'annule') { v.remove(); tampon('Sauvegarde envoyée'); aller('sauvegarde'); }
+    };
+    v.querySelector('#telech').onclick = () => {
+      telecharger(blob, nom);
+      v.remove(); tampon('Sauvegarde téléchargée'); aller('sauvegarde');
+    };
   };
 
   let mode = 'fusionner';

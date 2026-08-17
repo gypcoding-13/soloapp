@@ -93,6 +93,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 .ligne-tete input::placeholder{color:var(--gris-clair);font-weight:400}
 .l-suppr{border:0;background:transparent;color:var(--gris-clair);font-size:23px;line-height:1;padding:2px 4px;flex-shrink:0}
 .l-suppr:active{color:var(--danger)}
+.l-description{
+  width:100%;margin-top:8px;min-height:76px;padding:9px 10px;font-size:14.5px;line-height:1.5;
+  resize:none;overflow:hidden;background:var(--fond);border-color:transparent
+}
+.l-description:focus{background:var(--surface);border-color:var(--marine)}
+.l-description::placeholder{color:var(--gris-clair)}
 .ligne-grille{display:grid;grid-template-columns:70px 62px minmax(0,1fr);gap:7px;margin-top:9px}
 .ligne-grille input{padding:9px 10px;font-size:15px;text-align:right}
 .ligne-grille input[data-f=unite]{text-align:left}

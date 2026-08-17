@@ -84,8 +84,8 @@ export function vide(titre, sous) {
   return `<div class="vide">${ico('vide', 1.4)}<p>${ech(titre)}</p><small>${ech(sous)}</small></div>`;
 }
 
-export async function partagerFichier(blob, nomFichier, { objet, corps, destinataire } = {}) {
-  const fichier = new File([blob], nomFichier, { type: 'application/pdf' });
+export async function partagerFichier(blob, nomFichier, { objet, corps, destinataire, type } = {}) {
+  const fichier = new File([blob], nomFichier, { type: type ?? blob.type ?? 'application/pdf' });
   if (navigator.canShare?.({ files: [fichier] })) {
     try {
       await navigator.share({ files: [fichier], title: objet, text: corps });

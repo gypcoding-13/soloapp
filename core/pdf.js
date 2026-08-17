@@ -36,6 +36,17 @@ function hexRgb(hex) {
   );
 }
 
+// Luminance relative (WCAG) : au-dela du seuil, le blanc devient illisible
+// sur la couleur choisie et il faut basculer en texte sombre.
+function luminance(hex) {
+  const h = hex.replace('#', '');
+  const canal = (v) => {
+    const c = parseInt(v, 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * canal(h.slice(0, 2)) + 0.7152 * canal(h.slice(2, 4)) + 0.0722 * canal(h.slice(4, 6));
+}
+
 const NOIR = rgb(0.07, 0.09, 0.11);
 const GRIS = rgb(0.42, 0.45, 0.48);
 const TRAIT = rgb(0.85, 0.87, 0.89);
@@ -76,7 +87,9 @@ export async function genererPdf(doc, client, reglages) {
     pdf.embedFont(await chargerPolice(typo.corps), { subset: true }),
     pdf.embedFont(await chargerPolice(typo.chiffres), { subset: true }),
   ]);
-  const accent = hexRgb(reglages.couleur ?? '#B85C38');
+  const couleurAccent = reglages.couleur ?? '#B85C38';
+  const accent = hexRgb(couleurAccent);
+  const surAccent = luminance(couleurAccent) > 0.45 ? NOIR : rgb(1, 1, 1);
 
   let logo = null;
   if (reglages.logo) {
@@ -118,17 +131,22 @@ export async function genererPdf(doc, client, reglages) {
     enTeteTableau();
   }
 
+  const positionLogo = emetteur.logoPosition ?? 'gauche';
+  const logoEnTete = logo && positionLogo !== 'aucun';
+
   function enTete() {
     const haut = y;
 
     // Colonne gauche : logo ou raison sociale, puis identite.
     let yg = haut;
-    if (logo) {
+    if (logoEnTete) {
       const cadreL = 40 * MM, cadreH = 20 * MM;
       const ech = Math.min(cadreL / logo.width, cadreH / logo.height);
-      page.drawImage(logo, {
-        x: MARGE, y: haut - cadreH, width: logo.width * ech, height: logo.height * ech,
-      });
+      const l = logo.width * ech, h = logo.height * ech;
+      const x = positionLogo === 'centre' ? MARGE + (LARGEUR - l) / 2
+        : positionLogo === 'droite' ? MARGE + LARGEUR - l
+        : MARGE;
+      page.drawImage(logo, { x, y: haut - cadreH, width: l, height: h });
       yg = haut - cadreH - 4 * MM;
     } else {
       texte(emetteur.raisonSociale, 0, haut - 5 * MM, { police: fTitre, taille: 13, couleur: accent });
@@ -136,7 +154,7 @@ export async function genererPdf(doc, client, reglages) {
     }
 
     const identite = [
-      logo ? emetteur.raisonSociale : '',
+      logoEnTete ? emetteur.raisonSociale : '',
       emetteur.adresse,
       `${emetteur.codePostal ?? ''} ${emetteur.ville ?? ''}`.trim(),
       emetteur.telephone, emetteur.email,
@@ -205,7 +223,7 @@ export async function genererPdf(doc, client, reglages) {
     page.drawRectangle({ x: MARGE, y: y - 6 * MM, width: LARGEUR, height: 6 * MM, color: accent });
     for (const c of COLS) {
       texte(c.libelle, c.x + 1.5 * MM, y - 4.2 * MM, {
-        taille: 6.5, couleur: rgb(1, 1, 1), align: c.align, largeur: c.w - 3 * MM,
+        taille: 6.5, couleur: surAccent, align: c.align, largeur: c.w - 3 * MM,
       });
     }
     y -= 6 * MM;
@@ -260,11 +278,11 @@ export async function genererPdf(doc, client, reglages) {
     if (fond) {
       page.drawRectangle({ x: MARGE + boxX, y: y - 6.5 * MM, width: boxL, height: 6.5 * MM, color: fond });
     }
-    const couleur = fond ? rgb(1, 1, 1) : GRIS;
+    const couleur = fond ? surAccent : GRIS;
     texte(libelle, boxX + 2.5 * MM, y - 4.5 * MM, { taille: gras ? 8.5 : 8, couleur, police: gras ? fTitre : fCorps });
     texte(valeur, boxX, y - 4.5 * MM, {
       police: fChiffres, taille: gras ? 9.5 : 8,
-      couleur: fond ? rgb(1, 1, 1) : NOIR, align: 'right', largeur: boxL - 2.5 * MM,
+      couleur: fond ? surAccent : NOIR, align: 'right', largeur: boxL - 2.5 * MM,
     });
     y -= 6.5 * MM;
   };
@@ -330,6 +348,17 @@ export async function genererPdf(doc, client, reglages) {
     emetteur.regimeTva === 'franchise' ? 'TVA non applicable, art. 293 B du CGI' : '',
     emetteur.assurance, emetteur.mentionLibre,
   ].filter(Boolean).join('. ') + '.';
+
+  if (logo && emetteur.logoFiligrane) {
+    const cote = 110 * MM;
+    const ech = Math.min(cote / logo.width, cote / logo.height);
+    const l = logo.width * ech, h = logo.height * ech;
+    for (const p of pages) {
+      p.drawImage(logo, {
+        x: (A4[0] - l) / 2, y: (A4[1] - h) / 2, width: l, height: h, opacity: 0.07,
+      });
+    }
+  }
 
   pages.forEach((p, i) => {
     const lignesM = decouper(mentions, fCorps, 6, LARGEUR);

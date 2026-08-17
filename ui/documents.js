@@ -14,6 +14,13 @@ import { parseAmount, parseQty, parsePercent, formatAmount, formatQty } from '..
 import { genererPdf } from '../core/pdf.js';
 import { ficheClient, ficheArticle } from './fiches.js';
 
+function nouvelleLigneVide(reglages) {
+  return {
+    id: nouvelId(), type: 'prestation', designation: '', description: '',
+    qte: 1000, pu: 0, unite: '', remise: 0, tva: reglages.tauxDefaut ?? 2000,
+  };
+}
+
 const norm = (s) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const LIBELLE = { devis: 'Devis', facture: 'Facture', avoir: 'Avoir' };
 // Le francais n'accorde pas tout seul : on ecrit les articles a la main.
@@ -116,6 +123,12 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
 
   const clients = await tout('clients');
   const fige = estFige(doc);
+
+  // Un devis neuf s'ouvre avec une ligne prete a remplir : sans elle,
+  // l'utilisateur doit d'abord chercher un bouton avant de pouvoir saisir.
+  if (!fige && !id && doc.lignes.length === 0) {
+    doc.lignes.push(nouvelleLigneVide(reglages));
+  }
   majTitre?.(doc.numero ?? ARTICLE[doc.type].nouveau);
 
   const rendre = () => {
@@ -148,11 +161,9 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
       <div id="lignes">${doc.lignes.map(fige ? ligneFigee : ligneEditable).join('')}</div>
 
       ${!fige ? `
-      <button class="btn btn-large" id="ajLigne" style="margin-bottom:8px">${ico('plus', 2, 17)} Ajouter une ligne</button>
       <div class="actions" style="margin-top:0">
+        <button class="btn" id="ajLigne">${ico('plus', 2, 17)} Ajouter une ligne</button>
         <button class="btn" id="ajCatalogue">Catalogue</button>
-        <button class="btn" id="ajSection">Titre</button>
-        <button class="btn" id="ajTexte">Note</button>
       </div>
       <button class="btn btn-large" id="remise" style="margin-top:8px">Remise globale${doc.remiseGlobale ? ` · ${(doc.remiseGlobale / 100).toString().replace('.', ',')} %` : ''}</button>` : ''}
 
@@ -264,6 +275,8 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
         <input data-f="designation" value="${ech(l.designation)}" placeholder="Désignation">
         <button class="l-suppr" data-suppr aria-label="Supprimer">&times;</button>
       </div>
+      <textarea class="l-description" data-f="description" rows="3"
+        placeholder="Description de la prestation">${ech(l.description)}</textarea>
       <div class="ligne-grille">
         <input data-f="qte" inputmode="decimal" value="${formatQty(l.qte)}" placeholder="Qté" aria-label="Quantité">
         <input data-f="unite" value="${ech(l.unite)}" placeholder="Unité" aria-label="Unité">
@@ -333,6 +346,7 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
       if (doc.type === 'facture' && ['emise', 'envoyee', 'partiellement_reglee'].includes(doc.statut)) {
         boutons.push(`<button class="btn btn-plein btn-large" id="regler" style="margin-top:8px">${ico('euro')} Enregistrer un règlement</button>`);
       }
+      boutons.push(`<button class="btn btn-large" id="archiver" style="margin-top:8px">${ico('partage')} Archiver le PDF</button>`);
       if (doc.type === 'facture' && doc.statut !== 'annulee') {
         boutons.push(`<button class="btn btn-danger btn-large" id="avoir" style="margin-top:8px">Établir un avoir</button>`);
       }
@@ -362,7 +376,7 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
       const f = champ.dataset.f;
       const v = champ.value.trim();
       try {
-        if (f === 'designation' || f === 'unite') l[f] = champ.value;
+        if (f === 'designation' || f === 'unite' || f === 'description') l[f] = champ.value;
         else if (f === 'qte') l.qte = v ? parseQty(v) : 0;
         else if (f === 'pu') l.pu = v ? parseAmount(v) : 0;
         else if (f === 'remise') l.remise = v ? Math.min(10000, parsePercent(v)) : 0;
@@ -378,8 +392,16 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
       enregistrerBientot();
     };
 
+    const ajusterHauteur = (zt) => {
+      zt.style.height = 'auto';
+      zt.style.height = zt.scrollHeight + 'px';
+    };
+    zone.querySelectorAll('.l-description').forEach(ajusterHauteur);
+
     zone.addEventListener('input', (e) => {
-      if (e.target.dataset.f) majDepuisChamp(e.target);
+      if (!e.target.dataset.f) return;
+      if (e.target.classList.contains('l-description')) ajusterHauteur(e.target);
+      majDepuisChamp(e.target);
     });
     zone.addEventListener('change', (e) => {
       if (e.target.dataset.f === 'tva') majDepuisChamp(e.target);
@@ -407,22 +429,19 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
     });
 
     $('#ajLigne', app)?.addEventListener('click', () => ajouterLigne('prestation'));
-    $('#ajSection', app)?.addEventListener('click', () => ajouterLigne('section'));
-    $('#ajTexte', app)?.addEventListener('click', () => ajouterLigne('texte'));
     $('#ajCatalogue', app)?.addEventListener('click', depuisCatalogue);
     $('#remise', app)?.addEventListener('click', remiseGlobale);
   }
 
   async function ajouterLigne(type, valeurs = {}) {
-    const l = {
-      id: nouvelId(), type, designation: '', qte: 1000, pu: 0,
-      unite: '', remise: 0, tva: reglages.tauxDefaut, ...valeurs,
-    };
+    const l = { ...nouvelleLigneVide(reglages), type, ...valeurs };
     doc.lignes.push(l);
     await enregistrer();
     const zone = $('#lignes', app);
     zone.insertAdjacentHTML('beforeend', ligneEditable(l));
     $('#blocTotaux', app).innerHTML = totauxHtml();
+    const zt = zone.lastElementChild.querySelector('.l-description');
+    if (zt) { zt.style.height = 'auto'; zt.style.height = zt.scrollHeight + 'px'; }
     const champ = zone.lastElementChild.querySelector('[data-f=designation]');
     champ?.focus();
     champ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -439,6 +458,7 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
     on('#convertir', convertir);
     on('#regler', reglement);
     on('#avoir', etablirAvoir);
+    on('#archiver', archiver);
     on('#dupliquer', dupliquerDoc);
     on('#suppr', supprimerBrouillon);
   }
@@ -577,6 +597,18 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
     }
     tampon(r === 'partage' ? 'Document partagé' : 'PDF téléchargé');
     rendre();
+  }
+
+  // Archivage : on partage le PDF seul, vers Drive ou ailleurs. Ce n'est pas
+  // une sauvegarde — la base, les tarifs et les compteurs n'y sont pas.
+  async function archiver() {
+    const enregistre = await lire('pdfs', doc.id);
+    const blob = enregistre?.blob ?? await produirePdf(false);
+    const r = await partagerFichier(blob, `${doc.numero}.pdf`, {
+      objet: `${doc.numero} — ${reglages.raisonSociale}`,
+    });
+    if (r === 'annule') return;
+    tampon(r === 'partage' ? 'PDF envoyé' : 'PDF téléchargé');
   }
 
   async function transition(cible, message) {
