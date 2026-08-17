@@ -58,7 +58,7 @@ export async function vueDocuments(app, type, aller) {
       return q || filtre !== 'tous'
         ? vide('Aucun résultat', 'Changez de filtre ou de recherche.')
         : vide(type === 'devis' ? 'Aucun devis' : 'Aucune facture',
-               type === 'devis' ? 'Créez votre premier devis avec le bouton +.' : 'Les factures naissent d’un devis accepté.');
+               type === 'devis' ? 'Créez votre premier devis avec le bouton +.' : 'Convertissez un devis accepté, ou créez une facture directe avec le bouton +.');
     }
     return vus.map((d) => {
       const t = d.totaux ?? calculerTotaux(d);
@@ -107,6 +107,9 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
   let doc = id ? await lire('documents', id) : {
     id: nouvelId(), type: type ?? 'devis', statut: 'brouillon',
     clientId: clientId ?? null, lignes: [], remiseGlobale: 0, notes: '',
+    validite: reglages.validiteDevis ?? 30,
+    delaiPaiement: reglages.delaiPaiement ?? '30 jours',
+    chantier: { identique: true, adresse: '', cp: '', ville: '' },
     creeLe: horodatage(), reglements: [],
   };
   if (!doc) { tampon('Document introuvable'); aller('devis'); return; }
@@ -131,6 +134,15 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
         </div>
         ${!fige ? ico('chevron', 2, 17) : ''}
       </button>
+
+      ${!fige ? `
+      <button class="rangee" id="btnConditions">
+        <div class="corps">
+          <div class="titre">Conditions et lieu</div>
+          <div class="sous">${ech(resumeConditions())}</div>
+        </div>
+        ${ico('chevron', 2, 17)}
+      </button>` : ''}
 
       <div class="section">Lignes</div>
       <div id="lignes">${doc.lignes.map(fige ? ligneFigee : ligneEditable).join('')}</div>
@@ -172,6 +184,61 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
         <div class="l" style="margin-top:8px"><span>Déjà réglé</span><span>${eur(solde.regle)}</span></div>
         <div class="l"><span style="font-weight:500;color:var(--encre)">Reste à payer</span><span style="font-weight:500">${eur(solde.restant)}</span></div>` : ''}
     </div>`;
+  }
+
+  function resumeConditions() {
+    const bouts = [];
+    if (doc.type === 'devis') bouts.push(`Validité ${doc.validite ?? reglages.validiteDevis ?? 30} jours`);
+    bouts.push(`Règlement ${doc.delaiPaiement ?? reglages.delaiPaiement ?? '30 jours'}`);
+    const ch = doc.chantier;
+    if (ch && !ch.identique && (ch.ville || ch.adresse)) bouts.push(`Chantier : ${ch.ville || ch.adresse}`);
+    return bouts.join(' · ');
+  }
+
+  function ecranConditions() {
+    const ch = doc.chantier ?? { identique: true, adresse: '', cp: '', ville: '' };
+    const v = feuille('Conditions et lieu', `
+      ${doc.type === 'devis' ? `
+      <div class="champ"><label>Validité du devis</label>
+        <select id="validite">
+          ${[15, 30, 60, 90].map((j) => `<option value="${j}" ${Number(doc.validite ?? reglages.validiteDevis) === j ? 'selected' : ''}>${j} jours</option>`).join('')}
+        </select></div>` : ''}
+      <div class="champ"><label>Délai de paiement</label>
+        <select id="delai">
+          ${['À réception', '15 jours', '30 jours', '45 jours', '45 jours fin de mois', '60 jours']
+            .map((d) => `<option ${((doc.delaiPaiement ?? reglages.delaiPaiement) === d) ? 'selected' : ''}>${d}</option>`).join('')}
+        </select></div>
+
+      <label class="case" for="memeAdresse">
+        <input type="checkbox" id="memeAdresse" ${ch.identique ? 'checked' : ''}>
+        <span>Chantier à l'adresse de facturation</span>
+      </label>
+      <div id="blocChantier">
+        <div class="champ"><label>Adresse du chantier</label><input id="chAdresse" value="${ech(ch.adresse)}"></div>
+        <div class="duo">
+          <div class="champ"><label>Code postal</label><input id="chCp" inputmode="numeric" value="${ech(ch.cp)}"></div>
+          <div class="champ"><label>Ville</label><input id="chVille" value="${ech(ch.ville)}"></div>
+        </div>
+      </div>
+      <button class="btn btn-plein btn-large" data-ok>Enregistrer</button>`);
+
+    const maj = () => {
+      v.querySelector('#blocChantier').style.display =
+        v.querySelector('#memeAdresse').checked ? 'none' : 'block';
+    };
+    v.querySelector('#memeAdresse').addEventListener('change', maj); maj();
+
+    v.querySelector('[data-ok]').onclick = async () => {
+      if (doc.type === 'devis') doc.validite = Number(v.querySelector('#validite').value);
+      doc.delaiPaiement = v.querySelector('#delai').value;
+      doc.chantier = {
+        identique: v.querySelector('#memeAdresse').checked,
+        adresse: v.querySelector('#chAdresse').value.trim(),
+        cp: v.querySelector('#chCp').value.trim(),
+        ville: v.querySelector('#chVille').value.trim(),
+      };
+      await enregistrer(); v.remove(); rendre();
+    };
   }
 
   const htLigne = (l) => Math.round((l.qte * l.pu * (10000 - (l.remise ?? 0))) / (1000 * 10000));
@@ -280,6 +347,7 @@ export async function vueDocument(app, { id, type, clientId }, aller, majTitre) 
 
   function brancherEditeur() {
     $('#btnClient', app).onclick = fige ? null : choisirClient;
+    $('#btnConditions', app)?.addEventListener('click', ecranConditions);
     $('#notes', app).onchange = (e) => { doc.notes = e.target.value; enregistrer(); };
     if (fige) return;
 

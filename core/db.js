@@ -1,5 +1,5 @@
 import { emettre } from './documents.js';
-import { cleCompteur, fusionnerCompteurs } from './numbering.js';
+import { cleCompteur, fusionnerCompteurs, definirPointDeDepart } from './numbering.js';
 import { nouvelId, horodatage } from './documents.js';
 
 export const NOM_BASE = 'soloapp';
@@ -96,6 +96,7 @@ export const REGLAGES_DEFAUT = {
   raisonSociale: '', formeJuridique: 'EI', adresse: '', codePostal: '', ville: '',
   siret: '', rcs: '', apeCode: '', regimeTva: 'assujetti', tvaIntra: '',
   tauxDefaut: 2000, telephone: '', email: '', logo: null,
+  moyensPaiement: ['virement'], iban: '', titulaire: '',
   coordonneesPaiement: '', delaiPaiement: '30 jours',
   validiteDevis: 30, penalites: "3 × taux d'intérêt légal",
   indemniteRecouvrement: '40 €', assurance: '', mentionLibre: '', cgv: '',
@@ -146,6 +147,17 @@ export async function emettreDocument(doc, reglages, maintenant = new Date()) {
 
   await finTransaction(tx);
   return resultat.document;
+}
+
+// Point de depart des sequences : modifiable tant que rien n'est emis.
+export async function lireCompteur(type, annee = new Date().getFullYear()) {
+  const cle = cleCompteur(type, annee);
+  return (await lire('compteurs', cle)) ?? { cle, dernierRang: 0, verrouille: false };
+}
+
+export async function definirDepart(type, rangInitial, annee = new Date().getFullYear()) {
+  const compteur = await lireCompteur(type, annee);
+  return ecrire('compteurs', definirPointDeDepart(compteur, rangInitial));
 }
 
 export async function enregistrerPdf(documentId, blob) {

@@ -43,6 +43,10 @@ const FOND = rgb(0.965, 0.972, 0.976);
 
 const LIBELLES = { devis: 'DEVIS', facture: 'FACTURE', avoir: 'AVOIR' };
 
+// Intl.NumberFormat('fr-FR') separe les milliers par une espace fine insecable
+// (U+202F) absente des polices embarquees : elle se dessinait en carre vide.
+const lisible = (t) => String(t ?? '').replace(/[\u202F\u00A0]/g, ' ');
+
 // Coupe un texte a la largeur disponible, en respectant les mots.
 function decouper(texte, police, taille, largeur) {
   const lignes = [];
@@ -99,7 +103,7 @@ export async function genererPdf(doc, client, reglages) {
   let page, y;
 
   const texte = (t, x, yy, { police = fCorps, taille = 8.5, couleur = NOIR, align = 'left', largeur = 0 } = {}) => {
-    const s = String(t ?? '');
+    const s = lisible(t);
     let px = MARGE + x;
     if (align === 'right') px = MARGE + x + largeur - police.widthOfTextAtSize(s, taille);
     if (align === 'center') px = MARGE + x + (largeur - police.widthOfTextAtSize(s, taille)) / 2;
@@ -116,26 +120,32 @@ export async function genererPdf(doc, client, reglages) {
 
   function enTete() {
     const haut = y;
+
+    // Colonne gauche : logo ou raison sociale, puis identite.
+    let yg = haut;
     if (logo) {
       const cadreL = 40 * MM, cadreH = 20 * MM;
       const ech = Math.min(cadreL / logo.width, cadreH / logo.height);
       page.drawImage(logo, {
         x: MARGE, y: haut - cadreH, width: logo.width * ech, height: logo.height * ech,
       });
+      yg = haut - cadreH - 4 * MM;
     } else {
       texte(emetteur.raisonSociale, 0, haut - 5 * MM, { police: fTitre, taille: 13, couleur: accent });
+      yg = haut - 10 * MM;
     }
 
-    let ye = haut - (logo ? 24 * MM : 10 * MM);
     const identite = [
+      logo ? emetteur.raisonSociale : '',
       emetteur.adresse,
       `${emetteur.codePostal ?? ''} ${emetteur.ville ?? ''}`.trim(),
       emetteur.telephone, emetteur.email,
       emetteur.siret ? `SIRET ${emetteur.siret}` : '',
       emetteur.regimeTva === 'assujetti' && emetteur.tvaIntra ? `TVA ${emetteur.tvaIntra}` : '',
     ].filter(Boolean);
-    for (const l of identite) { texte(l, 0, ye, { taille: 7.5, couleur: GRIS }); ye -= 3.6 * MM; }
+    for (const l of identite) { texte(l, 0, yg, { taille: 7.5, couleur: GRIS }); yg -= 3.6 * MM; }
 
+    // Colonne droite : type de document, numero, cadre client.
     texte(LIBELLES[doc.type], 0, haut - 5 * MM, {
       police: fTitre, taille: 16, couleur: accent, align: 'right', largeur: LARGEUR,
     });
@@ -143,26 +153,52 @@ export async function genererPdf(doc, client, reglages) {
       police: fChiffres, taille: 9, couleur: GRIS, align: 'right', largeur: LARGEUR,
     });
 
-    const cadreH = 22 * MM, cadreL = 62 * MM;
-    const yCadre = haut - 26 * MM;
+    const cadreL = 64 * MM;
+    const lignesClient = [
+      cli.societe || cli.nom,
+      cli.societe && cli.nom ? cli.nom : '',
+      cli.adresse,
+      `${cli.cp ?? ''} ${cli.ville ?? ''}`.trim(),
+      cli.siret ? `SIRET ${cli.siret}` : '',
+    ].filter(Boolean);
+    const cadreH = 8 * MM + lignesClient.length * 3.8 * MM;
+    const yCadre = haut - 16 * MM;
     page.drawRectangle({
       x: MARGE + LARGEUR - cadreL, y: yCadre - cadreH, width: cadreL, height: cadreH, color: FOND,
     });
-    texte('CLIENT', LARGEUR - cadreL + 3 * MM, yCadre - 5 * MM, { taille: 6.5, couleur: GRIS });
-    let yc = yCadre - 9.5 * MM;
-    for (const l of [cli.societe || cli.nom, cli.adresse, `${cli.cp ?? ''} ${cli.ville ?? ''}`.trim(), cli.siret ? `SIRET ${cli.siret}` : ''].filter(Boolean)) {
-      texte(l, LARGEUR - cadreL + 3 * MM, yc, { taille: 8 });
+    texte('CLIENT', LARGEUR - cadreL + 3 * MM, yCadre - 4.5 * MM, { taille: 6.5, couleur: GRIS });
+    let yc = yCadre - 9 * MM;
+    for (const l of lignesClient) {
+      texte(l, LARGEUR - cadreL + 3 * MM, yc, { taille: 8, police: l === lignesClient[0] ? fTitre : fCorps });
       yc -= 3.8 * MM;
     }
 
+    // Bloc dates, place SOUS l'identite : c'est ce chevauchement qui cassait la page.
+    let yd = Math.min(yg, yCadre - cadreH - 1 * MM) - 2 * MM;
     const dates = [`Date : ${dateFr(doc.emisLe ?? doc.creeLe)}`];
-    if (doc.type === 'devis') dates.push(`Validité : ${dateFr(doc.emisLe ?? doc.creeLe, emetteur.validiteDevis ?? 30)}`);
-    if (doc.type === 'facture') dates.push(`Règlement : ${emetteur.delaiPaiement ?? ''}`);
+    if (doc.type === 'devis') {
+      dates.push(`Valable jusqu'au ${dateFr(doc.emisLe ?? doc.creeLe, doc.validite ?? emetteur.validiteDevis ?? 30)}`);
+    }
+    if (doc.type === 'facture') {
+      dates.push(`Règlement : ${doc.delaiPaiement ?? emetteur.delaiPaiement ?? ''}`);
+    }
     if (doc.type === 'avoir' && doc.factureSourceNumero) dates.push(`Facture ${doc.factureSourceNumero}`);
-    let yd = yCadre - 5 * MM;
+    if (doc.type === 'facture' && doc.devisSourceNumero) dates.push(`Devis ${doc.devisSourceNumero}`);
     for (const l of dates) { texte(l, 0, yd, { taille: 8, couleur: GRIS }); yd -= 4 * MM; }
 
-    y = Math.min(yc, yd) - 6 * MM;
+    // Adresse de chantier, quand elle differe de l'adresse de facturation.
+    const ch = doc.chantier;
+    if (ch && !ch.identique && (ch.adresse || ch.ville)) {
+      yd -= 1.5 * MM;
+      texte("LIEU D'INTERVENTION", 0, yd, { taille: 6.5, couleur: GRIS });
+      yd -= 4 * MM;
+      for (const l of [ch.adresse, `${ch.cp ?? ''} ${ch.ville ?? ''}`.trim()].filter(Boolean)) {
+        texte(l, 0, yd, { taille: 8 });
+        yd -= 3.8 * MM;
+      }
+    }
+
+    y = yd - 5 * MM;
   }
 
   function enTeteTableau() {
@@ -183,7 +219,11 @@ export async function genererPdf(doc, client, reglages) {
     const estPrestation = !ligne.type || ligne.type === 'prestation';
     const lignesTexte = decouper(ligne.designation, fCorps, 8.5, COLS[0].w - 3 * MM);
     const sousTitre = ligne.description ? decouper(ligne.description, fCorps, 7, COLS[0].w - 3 * MM) : [];
-    const hauteur = Math.max(6.5 * MM, (lignesTexte.length + sousTitre.length) * 3.9 * MM + 2.6 * MM);
+    const lignesRemise = estPrestation && ligne.remise ? 1 : 0;
+    const hauteur = Math.max(
+      6.5 * MM,
+      (lignesTexte.length + sousTitre.length) * 3.9 * MM + lignesRemise * 3.2 * MM + 2.6 * MM,
+    );
 
     if (y - hauteur < MARGE + RESERVE) nouvellePage();
 
@@ -270,12 +310,26 @@ export async function genererPdf(doc, client, reglages) {
   }
 
   // --- Pied de page sur chaque page ---
+  const NOM_MOYEN = {
+    virement: 'virement', cheque: 'chèque', especes: 'espèces',
+    carte: 'carte bancaire', lien: 'lien de paiement',
+  };
+  const moyens = (emetteur.moyensPaiement ?? []).map((m) => NOM_MOYEN[m] ?? m);
+  const reglement = [
+    moyens.length ? `Règlement par ${moyens.join(', ')}` : '',
+    moyens.includes('virement') && emetteur.iban
+      ? `IBAN ${formaterIban(emetteur.iban)}${emetteur.titulaire ? ' — ' + emetteur.titulaire : ''}`
+      : '',
+  ].filter(Boolean).join('. ');
+
   const mentions = [
-    emetteur.coordonneesPaiement ? `Règlement : ${emetteur.coordonneesPaiement}` : '',
-    doc.type !== 'devis' && emetteur.penalites ? `Pénalités de retard : ${emetteur.penalites}. Indemnité forfaitaire de recouvrement : ${emetteur.indemniteRecouvrement}.` : '',
-    emetteur.regimeTva === 'franchise' ? 'TVA non applicable, art. 293 B du CGI.' : '',
+    reglement,
+    doc.type !== 'devis' && emetteur.penalites
+      ? `Pénalités de retard : ${emetteur.penalites}. Indemnité forfaitaire de recouvrement : ${emetteur.indemniteRecouvrement}`
+      : '',
+    emetteur.regimeTva === 'franchise' ? 'TVA non applicable, art. 293 B du CGI' : '',
     emetteur.assurance, emetteur.mentionLibre,
-  ].filter(Boolean).join(' ');
+  ].filter(Boolean).join('. ') + '.';
 
   pages.forEach((p, i) => {
     const lignesM = decouper(mentions, fCorps, 6, LARGEUR);
@@ -285,10 +339,10 @@ export async function genererPdf(doc, client, reglages) {
       thickness: 0.4, color: TRAIT,
     });
     for (const l of lignesM) {
-      p.drawText(l, { x: MARGE, y: ym, size: 6, font: fCorps, color: GRIS });
+      p.drawText(lisible(l), { x: MARGE, y: ym, size: 6, font: fCorps, color: GRIS });
       ym -= 2.6 * MM;
     }
-    const num = `Page ${i + 1} / ${pages.length}`;
+    const num = lisible(`Page ${i + 1} / ${pages.length}`);
     p.drawText(num, {
       x: MARGE + LARGEUR - fChiffres.widthOfTextAtSize(num, 6.5),
       y: MARGE, size: 6.5, font: fChiffres, color: GRIS,
@@ -306,7 +360,7 @@ export async function genererPdf(doc, client, reglages) {
     let yc = A4[1] - MARGE - 8 * MM;
     for (const l of decouper(reglages.cgv, fCorps, 7, LARGEUR)) {
       if (yc < MARGE) break;
-      p.drawText(l, { x: MARGE, y: yc, size: 7, font: fCorps, color: NOIR });
+      p.drawText(lisible(l), { x: MARGE, y: yc, size: 7, font: fCorps, color: NOIR });
       yc -= 3.2 * MM;
     }
   }
@@ -332,6 +386,10 @@ function dessinerTrace(page, trace, x, y, largeur, hauteur) {
       });
     }
   }
+}
+
+export function formaterIban(iban) {
+  return String(iban ?? '').replace(/\s/g, '').toUpperCase().replace(/(.{4})/g, '$1 ').trim();
 }
 
 function ligneHTLocal(l) {

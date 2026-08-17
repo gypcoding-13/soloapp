@@ -1,7 +1,7 @@
 import { $, ech, ico, eur, dateFr, tampon, feuille, confirmer, telecharger } from './kit.js';
 import {
   ouvrir, lireReglages, ecrireReglages, demanderPersistance, espaceUtilise,
-  exporter, importer, documentsPar, journalNumeros,
+  exporter, importer, documentsPar, journalNumeros, tout,
 } from '../core/db.js';
 import { verifier, normaliser, nouvelIdentifiantAppareil } from '../core/activation.js';
 import { vueClients, vueArticles, vueReglages } from './fiches.js';
@@ -275,6 +275,15 @@ async function vueSauvegarde(app) {
           : 'Aucune sauvegarde effectuée'}</p>
     </div>
     <div class="carte">
+      <div style="font-weight:500;margin-bottom:6px">Exporter pour tableur</div>
+      <p style="font-size:13px;color:var(--gris);margin:0 0 12px;line-height:1.5">Des fichiers CSV lisibles dans Sheets ou Excel, pour consulter vos données ou les transmettre au comptable. Ils ne remplacent pas la sauvegarde : ils ne se réimportent pas.</p>
+      <div class="actions" style="margin:0">
+        <button class="btn" data-csv="clients">Clients</button>
+        <button class="btn" data-csv="articles">Prestations</button>
+        <button class="btn" data-csv="documents">Documents</button>
+      </div>
+    </div>
+    <div class="carte">
       <div style="font-weight:500;margin-bottom:6px">Importer</div>
       <p style="font-size:13px;color:var(--gris);margin:0 0 12px;line-height:1.5">Fusionner ajoute ce qui manque. Remplacer écrase tout. Dans les deux cas, la numérotation ne recule jamais.</p>
       <div class="actions" style="margin:0">
@@ -290,6 +299,8 @@ async function vueSauvegarde(app) {
       </div>
       <div style="font-size:12.5px;color:var(--gris)" class="mono">${(espace.usage / 1048576).toFixed(1)} Mo sur ${(espace.quota / 1048576).toFixed(0)} Mo</div>
     </div>` : ''}`;
+
+  app.querySelectorAll('[data-csv]').forEach((b) => b.onclick = () => exporterCsv(b.dataset.csv));
 
   $('#exp', app).onclick = async () => {
     const paquet = await exporter();
@@ -317,6 +328,71 @@ async function vueSauvegarde(app) {
       location.reload();
     } catch (err) { tampon(err.message); }
   };
+}
+
+// --- Export tableur ---
+
+const csvEchappe = (v) => {
+  const t = String(v ?? '');
+  return /[";\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+};
+
+// Separateur point-virgule et BOM : c'est ce qu'attend Excel en francais.
+function fabriquerCsv(entetes, lignes) {
+  const corps = [entetes, ...lignes].map((l) => l.map(csvEchappe).join(';')).join('\r\n');
+  return new Blob(['\ufeff' + corps], { type: 'text/csv;charset=utf-8' });
+}
+
+const nombreFr = (centimes) => ((centimes ?? 0) / 100).toFixed(2).replace('.', ',');
+
+async function exporterCsv(quoi) {
+  const jour = new Date().toISOString().slice(0, 10);
+
+  if (quoi === 'clients') {
+    const clients = (await tout('clients')).filter((c) => !c.archive);
+    telecharger(fabriquerCsv(
+      ['Type', 'Société', 'Contact', 'Adresse', 'Code postal', 'Ville', 'E-mail', 'Téléphone', 'SIRET'],
+      clients.map((c) => [
+        c.categorie === 'particulier' ? 'Particulier' : 'Professionnel',
+        c.societe, c.nom, c.adresse, c.cp, c.ville, c.email, c.telephone, c.siret,
+      ]),
+    ), `soloapp-clients-${jour}.csv`);
+    return tampon('Clients exportés');
+  }
+
+  if (quoi === 'articles') {
+    const articles = (await tout('articles')).filter((a) => !a.archive);
+    telecharger(fabriquerCsv(
+      ['Désignation', 'Description', 'Unité', 'Prix HT', 'TVA %'],
+      articles.map((a) => [a.designation, a.description, a.unite, nombreFr(a.pu), nombreFr(a.tva)]),
+    ), `soloapp-prestations-${jour}.csv`);
+    return tampon('Prestations exportées');
+  }
+
+  const clients = await tout('clients');
+  const nom = (id) => {
+    const c = clients.find((x) => x.id === id);
+    return c ? (c.societe || c.nom) : '';
+  };
+  const docs = [];
+  for (const type of ['devis', 'facture', 'avoir']) {
+    for (const d of await documentsPar(type)) if (d.numero) docs.push(d);
+  }
+  docs.sort((a, b) => (a.emisLe ?? '').localeCompare(b.emisLe ?? ''));
+
+  telecharger(fabriquerCsv(
+    ['Type', 'Numéro', 'Date', 'Client', 'SIRET client', 'Total HT', 'Total TVA', 'Total TTC', 'Réglé', 'Restant dû', 'Statut'],
+    docs.map((d) => {
+      const t = d.totaux ?? calculerTotaux(d);
+      const regle = (d.reglements ?? []).reduce((somme, r) => somme + r.montant, 0);
+      return [
+        d.type, d.numero, dateFr(d.emisLe), nom(d.clientId), d.clientInstantane?.siret ?? '',
+        nombreFr(t.totalHT), nombreFr(t.totalTVA), nombreFr(t.totalTTC),
+        nombreFr(regle), nombreFr(t.totalTTC - regle), d.statut,
+      ];
+    }),
+  ), `soloapp-documents-${jour}.csv`);
+  tampon('Documents exportés');
 }
 
 async function vueJournal(app) {

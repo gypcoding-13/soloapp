@@ -1,5 +1,5 @@
 import { $, ech, ico, eur, tampon, feuille, confirmer, vide } from './kit.js';
-import { tout, ecrire, lireReglages, ecrireReglages } from '../core/db.js';
+import { tout, ecrire, lireReglages, ecrireReglages, lireCompteur, definirDepart } from '../core/db.js';
 import { nouvelId } from '../core/documents.js';
 import { parseAmount, parsePercent, formatAmount } from '../core/money.js';
 
@@ -183,9 +183,14 @@ const COULEURS = [
   ['#B85C38', 'Cuivre'], ['#185FA5', 'Bleu'], ['#0F6E56', 'Vert'], ['#5F5E5A', 'Graphite'],
 ];
 const TYPOS = [['technique', 'Technique'], ['institutionnel', 'Institutionnel'], ['moderne', 'Moderne'], ['compact', 'Compact']];
+const MOYENS = [
+  ['virement', 'Virement'], ['cheque', 'Chèque'], ['especes', 'Espèces'],
+  ['carte', 'Carte bancaire'], ['lien', 'Lien de paiement'],
+];
 
 export async function vueReglages(app, { premierLancement = false, apres } = {}) {
   const r = await lireReglages();
+  const [cDevis, cFacture] = await Promise.all([lireCompteur('devis'), lireCompteur('facture')]);
   const ch = (cle, libelle, opts = '') =>
     `<div class="champ"><label>${libelle}</label><input name="${cle}" value="${ech(r[cle])}" ${opts}></div>`;
 
@@ -250,7 +255,17 @@ export async function vueReglages(app, { premierLancement = false, apres } = {})
       ${ch('penalites', 'Pénalités de retard')}
       ${ch('indemniteRecouvrement', 'Indemnité de recouvrement')}
       ${ch('assurance', 'Assurance professionnelle')}
-      <div class="champ"><label>Coordonnées de paiement</label><textarea name="coordonneesPaiement" style="min-height:64px" placeholder="Mode de règlement accepté">${ech(r.coordonneesPaiement)}</textarea></div>
+      <label>Moyens de règlement acceptés</label>
+      <div id="moyens" style="margin-bottom:10px">
+        ${MOYENS.map(([cle, nom]) => `<label class="case" for="m-${cle}">
+          <input type="checkbox" id="m-${cle}" data-moyen="${cle}" ${(r.moyensPaiement ?? []).includes(cle) ? 'checked' : ''}>
+          <span>${nom}</span></label>`).join('')}
+      </div>
+      <div id="blocVirement">
+        <div class="champ"><label>IBAN</label><input name="iban" value="${ech(r.iban)}" placeholder="FR76 3000 1007 9412 3456 7890 185" autocapitalize="characters"></div>
+        <div class="champ"><label>Titulaire du compte</label><input name="titulaire" value="${ech(r.titulaire)}" placeholder="Nom et prénom"></div>
+        <div class="erreur" id="errIban" hidden></div>
+      </div>
       ${ch('mentionLibre', 'Mention libre en pied de page')}
       <div class="champ" style="margin:0"><label>Conditions générales (page annexe)</label><textarea name="cgv" placeholder="Laissez vide pour ne pas ajouter de page">${ech(r.cgv)}</textarea></div>
     </div>
@@ -271,12 +286,30 @@ export async function vueReglages(app, { premierLancement = false, apres } = {})
     <div class="carte">
       <div class="duo">
         <div class="champ"><label>Préfixe devis</label><input name="prefixeDevis" value="${ech(r.prefixes.devis)}"></div>
-        <div class="champ" style="margin:0"><label>Préfixe facture</label><input name="prefixeFacture" value="${ech(r.prefixes.facture)}"></div>
+        <div class="champ"><label>Préfixe facture</label><input name="prefixeFacture" value="${ech(r.prefixes.facture)}"></div>
+      </div>
+      <div class="duo">
+        <div class="champ" style="margin:0"><label>Premier devis n°</label>
+          <input name="departDevis" inputmode="numeric" value="${cDevis.dernierRang + 1}" ${cDevis.verrouille ? 'disabled' : ''}></div>
+        <div class="champ" style="margin:0"><label>Première facture n°</label>
+          <input name="departFacture" inputmode="numeric" value="${cFacture.dernierRang + 1}" ${cFacture.verrouille ? 'disabled' : ''}></div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:flex-start;margin-top:10px;font-size:11.5px;color:${cDevis.verrouille || cFacture.verrouille ? 'var(--gris)' : 'var(--alerte)'};line-height:1.5">
+        <span>${cDevis.verrouille || cFacture.verrouille
+          ? 'Verrouillé : des documents ont déjà été émis.'
+          : 'Si vous avez déjà facturé ailleurs, reprenez votre séquence ici. Ce champ se verrouille à la première émission.'}</span>
       </div>
     </div>
 
     <button class="btn btn-plein btn-large" id="ok" style="margin-top:18px">${premierLancement ? 'Commencer' : 'Enregistrer'}</button>
     <p style="text-align:center;font-size:11.5px;color:var(--gris-clair);margin:16px 0 0">SoloApp · version 1.0</p>`;
+
+  const majVirement = () => {
+    const coche = app.querySelector('[data-moyen=virement]').checked;
+    $('#blocVirement', app).style.display = coche ? 'block' : 'none';
+  };
+  app.querySelector('[data-moyen=virement]').addEventListener('change', majVirement);
+  majVirement();
 
   const majMention = () => {
     const f = $('#regime', app).value === 'franchise';
@@ -310,15 +343,42 @@ export async function vueReglages(app, { premierLancement = false, apres } = {})
   $('#ok', app).onclick = async () => {
     const d = { ...r, couleur, typographie: typo, logo, configure: true };
     app.querySelectorAll('[name]').forEach((i) => { d[i.name] = i.value.trim(); });
+    d.moyensPaiement = [...app.querySelectorAll('[data-moyen]:checked')].map((c) => c.dataset.moyen);
+    if (d.moyensPaiement.includes('virement') && d.iban && !ibanPlausible(d.iban)) {
+      const e = $('#errIban', app);
+      e.textContent = "Cet IBAN ne semble pas valide. Vérifiez la saisie.";
+      e.hidden = false;
+      e.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+    d.iban = String(d.iban ?? '').replace(/\s/g, '').toUpperCase();
     d.tauxDefaut = Number(d.tauxDefaut ?? r.tauxDefaut);
     d.validiteDevis = Number(d.validiteDevis);
     d.prefixes = { ...r.prefixes, devis: d.prefixeDevis || 'DV-', facture: d.prefixeFacture || 'FA-' };
     delete d.prefixeDevis; delete d.prefixeFacture;
     if (!d.raisonSociale) { tampon('La raison sociale est obligatoire'); return; }
+    for (const [type, champ, compteur] of [['devis', 'departDevis', cDevis], ['facture', 'departFacture', cFacture]]) {
+      const depart = parseInt(d[champ], 10);
+      if (!compteur.verrouille && Number.isInteger(depart) && depart >= 1) {
+        await definirDepart(type, depart - 1);
+      }
+      delete d[champ];
+    }
     await ecrireReglages(d);
     tampon('Réglages enregistrés');
     apres?.(d);
   };
+}
+
+// Verification de la cle IBAN (norme ISO 7064, modulo 97).
+export function ibanPlausible(saisie) {
+  const iban = String(saisie).replace(/\s/g, '').toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban)) return false;
+  const permute = iban.slice(4) + iban.slice(0, 4);
+  const numerique = permute.replace(/[A-Z]/g, (c) => c.charCodeAt(0) - 55);
+  let reste = 0;
+  for (const chiffre of numerique) reste = (reste * 10 + Number(chiffre)) % 97;
+  return reste === 1;
 }
 
 function redimensionner(fichier, largeurMax) {
