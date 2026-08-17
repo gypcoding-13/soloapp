@@ -1,4 +1,4 @@
-const VERSION = 'soloapp-v1.0.0';
+const VERSION = 'soloapp-v1.0.1';
 
 const RESSOURCES = [
   './',
@@ -17,8 +17,8 @@ const RESSOURCES = [
   './core/activation.js',
   './core/codes.js',
   './core/pdf.js',
-  './vendor/pdf-lib.esm.min.js',
-  './vendor/fontkit.es.min.js',
+  './vendor/pdf-lib.min.js',
+  './vendor/fontkit.umd.min.js',
   './assets/icon-192.png',
   './assets/icon-512.png',
   './assets/fonts/archivo.woff2',

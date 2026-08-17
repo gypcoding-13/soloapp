@@ -1,5 +1,7 @@
-import { PDFDocument, rgb, StandardFonts } from '../vendor/pdf-lib.esm.min.js';
-import fontkit from '../vendor/fontkit.es.min.js';
+// pdf-lib et fontkit sont charges en UMD depuis index.html : les builds ESM
+// contiennent un import nu de "pako" que le navigateur ne sait pas resoudre.
+const { PDFDocument, rgb } = globalThis.PDFLib;
+const fontkit = globalThis.fontkit;
 import { calculerTotaux } from './totals.js';
 import { formatAmount, formatQty, formatPercent } from './money.js';
 
